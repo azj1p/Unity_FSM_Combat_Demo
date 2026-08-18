@@ -387,17 +387,20 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 3eb7dc262997a3e4691445a3ff1bd984, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PlayerController
+  statsAsset: {fileID: 0}
   maxHealth: 300
   currentHealth: 0
-  healthBar: {fileID: 1245992745}
   moveSpeed: 5
   jumpForce: 5
   attackDamage: 10
   toughnessDamage: 35
+  healthBar: {fileID: 1245992745}
   idleState: {fileID: 11400000, guid: 9565c7ab2731d7a489e8322bf0e48c5e, type: 2}
   moveState: {fileID: 11400000, guid: 2e0600bfa7c2c9b49a9ddf0ba223acda, type: 2}
   attackState: {fileID: 11400000, guid: e5a56cfa03768814db042ec462c0b498, type: 2}
+  deadState: {fileID: 11400000, guid: 463befdfdc9d95e42ab8a2c3893063d2, type: 2}
   stateMachine: {fileID: 0}
+  rb: {fileID: 0}
   isDead: 0
 --- !u!54 &364236766
 Rigidbody:
