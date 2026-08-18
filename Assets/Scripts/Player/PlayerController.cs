@@ -1,64 +1,68 @@
 using UnityEngine;
 using UnityEngine.UI;
 
-// 【玩家模块】玩家主控制器，管理生命值(HP)、受击/死亡逻辑及 FSM 状态切换入口
 public class PlayerController : MonoBehaviour
 {
-    [Header("生命值属性")]
+    [Header("Health")]
     public float maxHealth = 100f;
     public float currentHealth;
-    public Slider healthBar; // 玩家血条 UI
+    public Slider healthBar;
 
-    [Header("移动属性")]
-    public float moveSpeed = 5f;
+    [Header("Combat")]
+    public float moveSpeed = 5.0f;
+    public float jumpForce = 5.0f;
+    public float attackDamage = 20.0f;
+    public float toughnessDamage = 25.0f;
 
-    [Header("战斗属性")]
-    public float attackDamage = 25f;
-    public float toughnessDamage = 35f;
-
-    [Header("玩家 FSM 状态配置")]
+    [Header("States")]
     public State idleState;
     public State moveState;
     public State attackState;
 
-    private StateMachine stateMachine;
-    private bool isDead = false;
+    [HideInInspector] public StateMachine stateMachine;
+    [HideInInspector] public bool isDead;
 
     private void Start()
     {
         currentHealth = maxHealth;
-        UpdateUI();
-
         stateMachine = GetComponent<StateMachine>();
-        if (stateMachine == null)
+
+        // 状态机兜底初始化
+        if (stateMachine != null)
         {
-            stateMachine = gameObject.AddComponent<StateMachine>();
+            if (stateMachine.CurrentState == null && idleState != null)
+            {
+                stateMachine.ChangeState(idleState);
+            }
         }
 
-        if (idleState != null)
-        {
-            stateMachine.ChangeState(Instantiate(idleState));
-        }
+        UpdateUI();
     }
 
-    // 玩家受伤逻辑
-    public void TakeDamage(float amount)
+    public void TakeDamage(float damage, float toughnessDamage = 0f)
     {
         if (isDead) return;
 
-        currentHealth -= amount;
+        currentHealth -= damage;
         currentHealth = Mathf.Clamp(currentHealth, 0, maxHealth);
         UpdateUI();
 
-        Debug.Log($"玩家遭到敌人攻击！当前生命值剩余: {currentHealth}/{maxHealth}");
-
+        Debug.Log($"玩家受击！生命剩余: {currentHealth}/{maxHealth}");
         if (currentHealth <= 0)
         {
             Die();
         }
     }
 
-    private void UpdateUI()
+    public void ChangeState(State newState)
+    {
+        if (stateMachine != null && newState != null)
+        {
+            stateMachine.ChangeState(newState);
+        }
+    }
+
+    public void UpdateUI()
     {
         if (healthBar != null)
         {
@@ -67,18 +71,9 @@ public class PlayerController : MonoBehaviour
         }
     }
 
-    private void Die()
+    public void Die()
     {
         isDead = true;
         Debug.Log("【玩家死亡】玩家生命值归零！");
-        Destroy(gameObject, 0.2f);
-    }
-
-    public void ChangeState(State newState)
-    {
-        if (stateMachine != null && newState != null)
-        {
-            stateMachine.ChangeState(Instantiate(newState));
-        }
     }
 }

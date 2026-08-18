@@ -1,27 +1,50 @@
 using UnityEngine;
 
-// 【玩家状态】待机状态，检测 WASD 移动与鼠标左键攻击输入
 [CreateAssetMenu(fileName = "PlayerIdleState", menuName = "FSM/Player/IdleState")]
 public class PlayerIdleState : State
 {
+    public override void OnEnter(StateMachine stateMachine)
+    {
+        var rb = stateMachine.GetComponent<Rigidbody>();
+        if (rb != null && !rb.isKinematic)
+        {
+            rb.linearVelocity = new Vector3(0, rb.linearVelocity.y, 0);
+        }
+    }
+
     public override void TransitionChecks(StateMachine stateMachine)
     {
-        var player = stateMachine.GetComponent<PlayerController>();
-        if (player == null) return;
+        var controller = stateMachine.GetComponent<PlayerController>();
+        if (controller == null) return;
 
-        // 检测 WASD 移动
+        // 空格跳跃
+        if (Input.GetKeyDown(KeyCode.Space))
+        {
+            var rb = stateMachine.GetComponent<Rigidbody>();
+            if (rb != null && Physics.Raycast(stateMachine.transform.position, Vector3.down, 1.2f))
+            {
+                rb.AddForce(Vector3.up * controller.jumpForce, ForceMode.Impulse);
+            }
+        }
+
         float h = Input.GetAxisRaw("Horizontal");
         float v = Input.GetAxisRaw("Vertical");
-        if (h != 0 || v != 0)
+        bool isMoving = (Mathf.Abs(h) > 0.01f || Mathf.Abs(v) > 0.01f) ||
+                        Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.S) ||
+                        Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.D);
+
+        if (isMoving && controller.moveState != null)
         {
-            player.ChangeState(player.moveState);
+            stateMachine.ChangeState(controller.moveState);
             return;
         }
 
-        // 改为检测鼠标左键攻击 (GetMouseButtonDown(0))
-        if (Input.GetMouseButtonDown(0))
+        if (Input.GetKeyDown(KeyCode.J) || Input.GetMouseButtonDown(0))
         {
-            player.ChangeState(player.attackState);
+            if (controller.attackState != null)
+            {
+                stateMachine.ChangeState(controller.attackState);
+            }
         }
     }
 }

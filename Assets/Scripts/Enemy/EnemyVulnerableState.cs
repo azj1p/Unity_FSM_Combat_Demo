@@ -1,50 +1,70 @@
-// 【敌人状态】破韧脆硬直状态，韧性归零后触发，固定持续一定时间后恢复韧性
 using UnityEngine;
 
 [CreateAssetMenu(fileName = "EnemyVulnerableState", menuName = "FSM/Enemy/VulnerableState")]
-public class EnemyVulnerableState : State
+public class EnemyVulnerableState : State, IDamageModifier
 {
-    [Header("破韧参数")]
-    public float vulnerableDuration = 3.0f; // 固定破韧硬直持续时间 (3 秒)
+    [Header("Vulnerable Settings")]
+    [Tooltip("破韧虚弱持续时间（秒）")]
+    public float vulnerableDuration = 3.0f;
+    [Tooltip("破韧状态下的受击伤害倍率")]
+    public float damageMultiplier = 1.25f;
+
     private float timer;
 
     public override void OnEnter(StateMachine stateMachine)
     {
         timer = vulnerableDuration;
-
-        var enemy = stateMachine.GetComponent<EnemyController>();
-        if (enemy != null)
+        var controller = stateMachine.GetComponent<EnemyController>();
+        if (controller != null)
         {
-            enemy.isVulnerable = true; // 进入破韧标记
-            Debug.Log($"【FSM驱动】怪物进入破韧硬直状态，固定持续 {vulnerableDuration} 秒！");
+            controller.isVulnerable = true;
+            controller.SetVulnerableVisual(true); // 开启虚弱变色
         }
+
+        var animator = stateMachine.GetComponent<Animator>();
+        if (animator != null)
+        {
+            animator.SetTrigger("Vulnerable");
+        }
+
+        Debug.Log($"【FSM驱动】怪物进入破韧硬直状态，持续 {vulnerableDuration} 秒！");
     }
 
     public override void LogicUpdate(StateMachine stateMachine)
     {
-        // 独立倒计时：无论期间被攻击多少次，该倒计时均不受影响
         timer -= Time.deltaTime;
     }
 
     public override void TransitionChecks(StateMachine stateMachine)
     {
-        // 倒计时结束后自动恢复韧性并切回追击/攻击状态
-        if (timer <= 0)
+        if (timer <= 0f)
         {
-            var enemy = stateMachine.GetComponent<EnemyController>();
-            if (enemy != null)
+            var controller = stateMachine.GetComponent<EnemyController>();
+            if (controller != null)
             {
-                enemy.ResetToughness();
+                controller.ResetToughness();
+                if (controller.chaseState != null)
+                {
+                    stateMachine.ChangeState(controller.chaseState);
+                }
             }
         }
     }
 
     public override void OnExit(StateMachine stateMachine)
     {
-        var enemy = stateMachine.GetComponent<EnemyController>();
-        if (enemy != null)
+        var controller = stateMachine.GetComponent<EnemyController>();
+        if (controller != null)
         {
-            enemy.isVulnerable = false;
+            controller.isVulnerable = false;
+            controller.SetVulnerableVisual(false); // 恢复初始原色
         }
+    }
+
+    public float ModifyDamage(float baseDamage)
+    {
+        float modified = baseDamage * damageMultiplier;
+        Debug.Log($"【IDamageModifier】触发破韧易伤修饰！基础: {baseDamage} -> 修饰后: {modified} ({damageMultiplier}x)");
+        return modified;
     }
 }

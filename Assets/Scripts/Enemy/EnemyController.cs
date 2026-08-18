@@ -1,68 +1,137 @@
-// 【敌人模块】敌人主控制器，管理血条/韧性条 UI、受击扣血/削韧及触发破韧(Break)硬直
 using UnityEngine;
 using UnityEngine.UI;
 
 public class EnemyController : MonoBehaviour
 {
-    [Header("属性设置")]
+    [Header("Health")]
     public float maxHealth = 100f;
     public float currentHealth;
+
+    [Header("Toughness")]
     public float maxToughness = 100f;
     public float currentToughness;
+    [HideInInspector] public bool isVulnerable;
 
-    [Header("破韧增伤设置")]
-    public float vulnerableDamageMultiplier = 1.25f; // 破韧状态受到的伤害倍率 (1.25倍)
-    [HideInInspector] public bool isVulnerable = false; // 是否处于破韧硬直状态
+    [Header("Environmental Resonance (环境共鸣)")]
+    public int resonanceStacks = 0;
+    public int maxResonanceStacks = 3;
+    public float resonanceDamageBonus = 0.1f;
+    public float resonanceInterval = 6.0f;
+    public float aoeRadius = 8.0f;
+    private float resonanceTimer;
 
-    [Header("UI 槽位")]
+    [Header("UI")]
     public Slider healthBar;
     public Slider toughnessBar;
 
-    [Header("敌人 FSM 状态资源配置")]
+    [Header("States")]
     public State idleState;
     public State patrolState;
     public State chaseState;
     public State attackState;
     public State vulnerableState;
+    public State deadState;
 
-    private StateMachine stateMachine;
-    private bool isDead = false;
+    [HideInInspector] public StateMachine stateMachine;
+    [HideInInspector] public bool isDead;
+    [HideInInspector] public Transform playerTransform;
+
+    // 独立管理每个怪物的材质和初始颜色，防止多个怪物共享状态时颜色错乱
+    private Renderer enemyRenderer;
+    private Color originalColor;
 
     private void Start()
     {
         currentHealth = maxHealth;
         currentToughness = maxToughness;
+        resonanceTimer = resonanceInterval;
         stateMachine = GetComponent<StateMachine>();
 
-        UpdateUI();
-
-        if (patrolState != null)
+        // 记录当前怪物的独立材质与初始颜色
+        enemyRenderer = GetComponent<Renderer>();
+        if (enemyRenderer != null)
         {
-            stateMachine.ChangeState(Instantiate(patrolState));
+            originalColor = enemyRenderer.material.color;
+        }
+
+        var playerObj = GameObject.FindWithTag("Player");
+        if (playerObj != null)
+        {
+            playerTransform = playerObj.transform;
+        }
+
+        UpdateUI();
+    }
+
+    private void Update()
+    {
+        if (isDead || isVulnerable) return;
+
+        resonanceTimer -= Time.deltaTime;
+        if (resonanceTimer <= 0f)
+        {
+            resonanceTimer = resonanceInterval;
+            if (resonanceStacks < maxResonanceStacks)
+            {
+                resonanceStacks++;
+                Debug.Log($"【环境共鸣】层数上升: {resonanceStacks}/{maxResonanceStacks} (+{resonanceStacks * resonanceDamageBonus * 100}% 增伤)");
+
+                if (resonanceStacks >= maxResonanceStacks)
+                {
+                    TriggerResonanceAOE();
+                }
+            }
         }
     }
 
-    public void TakeDamage(float hpDamage, float toughnessDamage)
+    // 独立的破韧视觉变色控制（安全可靠）
+    public void SetVulnerableVisual(bool enable)
+    {
+        if (enemyRenderer != null)
+        {
+            enemyRenderer.material.color = enable ? new Color(0.6f, 0.6f, 0.6f, 1f) : originalColor;
+        }
+    }
+
+    public void TriggerResonanceAOE()
+    {
+        Debug.LogWarning("【环境共鸣爆发】共鸣满层！释放 8m AOE 爆发技能！");
+        if (playerTransform != null)
+        {
+            float dist = Vector3.Distance(transform.position, playerTransform.position);
+            if (dist <= aoeRadius)
+            {
+                var player = playerTransform.GetComponent<PlayerController>();
+                if (player != null)
+                {
+                    player.TakeDamage(30f);
+                }
+            }
+        }
+        resonanceStacks = 0;
+    }
+
+    public float GetCalculatedAttackDamage(float baseDamage)
+    {
+        return baseDamage * (1f + resonanceStacks * resonanceDamageBonus);
+    }
+
+    public void TakeDamage(float damage, float toughnessDamage)
     {
         if (isDead) return;
 
-        // 核心改动：如果处于破韧状态，伤害提升至 1.25 倍，且期间不重复削韧
-        if (isVulnerable)
+        if (stateMachine != null && stateMachine.CurrentState is IDamageModifier modifier)
         {
-            hpDamage *= vulnerableDamageMultiplier;
-            toughnessDamage = 0f;
-            Debug.Log($"【破韧易伤触发】怪物处于破韧状态，受到 1.25 倍伤害！实际伤害: {hpDamage}");
+            damage = modifier.ModifyDamage(damage);
         }
 
-        currentHealth -= hpDamage;
+        currentHealth -= damage;
         currentToughness -= toughnessDamage;
-
         currentHealth = Mathf.Clamp(currentHealth, 0, maxHealth);
         currentToughness = Mathf.Clamp(currentToughness, 0, maxToughness);
-
         UpdateUI();
 
-        Debug.Log($"怪物受击！生命剩余: {currentHealth}/{maxHealth} | 韧性剩余: {currentToughness}/{maxToughness}");
+        Debug.Log($"怪物受击！生命: {currentHealth}/{maxHealth} | 韧性: {currentToughness}/{maxToughness}");
 
         if (currentHealth <= 0)
         {
@@ -70,21 +139,39 @@ public class EnemyController : MonoBehaviour
             return;
         }
 
-        // 只有在非破韧状态下，韧性归零才触发破韧
         if (!isVulnerable && currentToughness <= 0)
         {
             TriggerBreak();
         }
     }
 
-    private void UpdateUI()
+    public void TriggerBreak()
+    {
+        resonanceStacks = 0;
+        resonanceTimer = resonanceInterval;
+        Debug.Log("【机制触发】怪物被破韧！共鸣层数已清零重置！");
+
+        if (stateMachine != null && vulnerableState != null)
+        {
+            stateMachine.ChangeState(vulnerableState);
+        }
+    }
+
+    public void ResetToughness()
+    {
+        if (isDead) return;
+        currentToughness = maxToughness;
+        UpdateUI();
+        Debug.Log("【韧性重置】怪物韧性条已回满！");
+    }
+
+    public void UpdateUI()
     {
         if (healthBar != null)
         {
             healthBar.maxValue = maxHealth;
             healthBar.value = currentHealth;
         }
-
         if (toughnessBar != null)
         {
             toughnessBar.maxValue = maxToughness;
@@ -92,35 +179,26 @@ public class EnemyController : MonoBehaviour
         }
     }
 
-    private void TriggerBreak()
-    {
-        if (stateMachine != null && vulnerableState != null)
-        {
-            stateMachine.ChangeState(Instantiate(vulnerableState));
-        }
-    }
-
-    // 破韧倒计时结束后由 EnemyVulnerableState 调用，重置韧性
-    public void ResetToughness()
+    public void Die()
     {
         if (isDead) return;
-
-        isVulnerable = false;
-        currentToughness = maxToughness;
-        UpdateUI();
-
-        Debug.Log("【韧性重置】怪物破韧时间结束，韧性条已回满！");
-
-        if (stateMachine != null && chaseState != null)
+        if (stateMachine != null && deadState != null)
         {
-            stateMachine.ChangeState(Instantiate(chaseState));
+            stateMachine.ChangeState(deadState);
+        }
+        else
+        {
+            isDead = true;
+            Destroy(gameObject, 0.2f);
         }
     }
 
-    private void Die()
+    private void OnDrawGizmosSelected()
     {
-        isDead = true;
-        Debug.Log("【死亡】怪物生命值归零，已被击败！");
-        Destroy(gameObject, 0.2f);
+        Gizmos.color = new Color(1f, 0f, 0f, 0.35f);
+        Gizmos.DrawWireSphere(transform.position, aoeRadius);
+
+        Gizmos.color = Color.yellow;
+        Gizmos.DrawWireSphere(transform.position, 2.0f);
     }
 }

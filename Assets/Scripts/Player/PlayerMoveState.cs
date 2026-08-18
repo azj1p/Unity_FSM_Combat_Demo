@@ -1,70 +1,95 @@
 using UnityEngine;
 
-// 【玩家状态】移动与跳跃状态，处理基于相机的相对移动方向、角色平滑转向及跳跃判定
 [CreateAssetMenu(fileName = "PlayerMoveState", menuName = "FSM/Player/MoveState")]
 public class PlayerMoveState : State
 {
-    public float jumpForce = 5f; // 跳跃力度
-
     public override void LogicUpdate(StateMachine stateMachine)
     {
-        var player = stateMachine.GetComponent<PlayerController>();
-        if (player == null) return;
+        var controller = stateMachine.GetComponent<PlayerController>();
+        if (controller == null) return;
 
         float h = Input.GetAxisRaw("Horizontal");
         float v = Input.GetAxisRaw("Vertical");
+
+        if (h == 0 && v == 0)
+        {
+            if (Input.GetKey(KeyCode.W)) v += 1f;
+            if (Input.GetKey(KeyCode.S)) v -= 1f;
+            if (Input.GetKey(KeyCode.D)) h += 1f;
+            if (Input.GetKey(KeyCode.A)) h -= 1f;
+        }
+
         Vector3 inputDir = new Vector3(h, 0, v).normalized;
 
-        if (inputDir.magnitude >= 0.1f)
+        if (inputDir.magnitude > 0.05f)
         {
-            // 获取镜头朝向，计算相对于镜头的移动方向
-            Camera mainCam = Camera.main;
-            Vector3 camForward = mainCam.transform.forward;
-            Vector3 camRight = mainCam.transform.right;
-            camForward.y = 0;
-            camRight.y = 0;
-            camForward.Normalize();
-            camRight.Normalize();
+            Vector3 moveDir = inputDir;
+            if (Camera.main != null)
+            {
+                Vector3 camForward = Camera.main.transform.forward;
+                Vector3 camRight = Camera.main.transform.right;
+                camForward.y = 0f;
+                camRight.y = 0f;
+                camForward.Normalize();
+                camRight.Normalize();
+                moveDir = (camForward * inputDir.z + camRight * inputDir.x).normalized;
+            }
 
-            Vector3 moveDir = (camForward * inputDir.z + camRight * inputDir.x).normalized;
+            if (moveDir != Vector3.zero)
+            {
+                Quaternion targetRot = Quaternion.LookRotation(moveDir);
+                stateMachine.transform.rotation = Quaternion.Slerp(
+                    stateMachine.transform.rotation,
+                    targetRot,
+                    15f * Time.deltaTime
+                );
+            }
 
-            // 移动玩家
-            player.transform.Translate(moveDir * player.moveSpeed * Time.deltaTime, Space.World);
-
-            // 角色自动平滑转向当前移动的方向
-            Quaternion targetRotation = Quaternion.LookRotation(moveDir);
-            player.transform.rotation = Quaternion.Slerp(player.transform.rotation, targetRotation, 15f * Time.deltaTime);
+            var rb = stateMachine.GetComponent<Rigidbody>();
+            if (rb != null)
+            {
+                Vector3 targetPos = rb.position + moveDir * (controller.moveSpeed * Time.deltaTime);
+                rb.MovePosition(targetPos);
+            }
+            else
+            {
+                stateMachine.transform.position += moveDir * (controller.moveSpeed * Time.deltaTime);
+            }
         }
     }
 
     public override void TransitionChecks(StateMachine stateMachine)
     {
-        var player = stateMachine.GetComponent<PlayerController>();
-        if (player == null) return;
+        var controller = stateMachine.GetComponent<PlayerController>();
+        if (controller == null) return;
 
-        // 1. 切回待机 (Idle)
-        float h = Input.GetAxisRaw("Horizontal");
-        float v = Input.GetAxisRaw("Vertical");
-        if (h == 0 && v == 0)
-        {
-            player.ChangeState(player.idleState);
-            return;
-        }
-
-        // 2. 切入攻击 (鼠标左键)
-        if (Input.GetMouseButtonDown(0))
-        {
-            player.ChangeState(player.attackState);
-            return;
-        }
-
-        // 3. 跳跃处理 (Space 键)
+        // 跳跃检测 (Space 键 + 地面检测)
         if (Input.GetKeyDown(KeyCode.Space))
         {
-            Rigidbody rb = player.GetComponent<Rigidbody>();
-            if (rb != null && Mathf.Abs(rb.linearVelocity.y) < 0.05f)
+            var rb = stateMachine.GetComponent<Rigidbody>();
+            if (rb != null && Physics.Raycast(stateMachine.transform.position, Vector3.down, 1.2f))
             {
-                rb.AddForce(Vector3.up * jumpForce, ForceMode.Impulse);
+                rb.AddForce(Vector3.up * controller.jumpForce, ForceMode.Impulse);
+            }
+        }
+
+        float h = Input.GetAxisRaw("Horizontal");
+        float v = Input.GetAxisRaw("Vertical");
+        bool hasInput = (Mathf.Abs(h) > 0.01f || Mathf.Abs(v) > 0.01f) ||
+                        Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.S) ||
+                        Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.D);
+
+        if (!hasInput && controller.idleState != null)
+        {
+            stateMachine.ChangeState(controller.idleState);
+            return;
+        }
+
+        if (Input.GetKeyDown(KeyCode.J) || Input.GetMouseButtonDown(0))
+        {
+            if (controller.attackState != null)
+            {
+                stateMachine.ChangeState(controller.attackState);
             }
         }
     }
