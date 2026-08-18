@@ -1,18 +1,22 @@
 using UnityEngine;
 using UnityEngine.UI;
 
-public class PlayerController : MonoBehaviour
+public class PlayerController : MonoBehaviour, IDamageable
 {
-    [Header("Health")]
+    [Header("Stats Asset (数据驱动)")]
+    [Tooltip("可选：拖入配置好的 Stats 资产文件；若为空则使用下方默认值")]
+    public CharacterStatsSO statsAsset;
+
+    [Header("Runtime Attributes")]
     public float maxHealth = 100f;
     public float currentHealth;
-    public Slider healthBar;
-
-    [Header("Combat")]
     public float moveSpeed = 5.0f;
     public float jumpForce = 5.0f;
     public float attackDamage = 20.0f;
     public float toughnessDamage = 25.0f;
+
+    [Header("UI")]
+    public Slider healthBar;
 
     [Header("States")]
     public State idleState;
@@ -20,22 +24,34 @@ public class PlayerController : MonoBehaviour
     public State attackState;
 
     [HideInInspector] public StateMachine stateMachine;
+    [HideInInspector] public Rigidbody rb;
     [HideInInspector] public bool isDead;
+
+    private void Awake()
+    {
+        // 缓存组件，消除运行期 GetComponent 开销
+        stateMachine = GetComponent<StateMachine>();
+        rb = GetComponent<Rigidbody>();
+
+        // 数据驱动：从 SO 加载数值
+        if (statsAsset != null)
+        {
+            maxHealth = statsAsset.maxHealth;
+            moveSpeed = statsAsset.moveSpeed;
+            jumpForce = statsAsset.jumpForce;
+            attackDamage = statsAsset.attackDamage;
+            toughnessDamage = statsAsset.toughnessDamage;
+        }
+
+        currentHealth = maxHealth;
+    }
 
     private void Start()
     {
-        currentHealth = maxHealth;
-        stateMachine = GetComponent<StateMachine>();
-
-        // 状态机兜底初始化
-        if (stateMachine != null)
+        if (stateMachine != null && stateMachine.CurrentState == null && idleState != null)
         {
-            if (stateMachine.CurrentState == null && idleState != null)
-            {
-                stateMachine.ChangeState(idleState);
-            }
+            stateMachine.ChangeState(idleState);
         }
-
         UpdateUI();
     }
 
@@ -54,14 +70,6 @@ public class PlayerController : MonoBehaviour
         }
     }
 
-    public void ChangeState(State newState)
-    {
-        if (stateMachine != null && newState != null)
-        {
-            stateMachine.ChangeState(newState);
-        }
-    }
-
     public void UpdateUI()
     {
         if (healthBar != null)
@@ -74,6 +82,6 @@ public class PlayerController : MonoBehaviour
     public void Die()
     {
         isDead = true;
-        Debug.Log("【玩家死亡】玩家生命值归零！");
+        Debug.Log("【玩家死亡】游戏结束！");
     }
 }

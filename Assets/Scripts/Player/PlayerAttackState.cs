@@ -13,18 +13,18 @@ public class PlayerAttackState : State
         var controller = stateMachine.GetComponent<PlayerController>();
         if (controller == null) return;
 
-        Debug.Log("【玩家攻击】挥刀攻击！");
+        Debug.Log("【玩家攻击】挥刀判定！");
 
-        // 范围判定敌人
+        // 使用 IDamageable 接口进行多态伤害结算
         Collider[] hits = Physics.OverlapSphere(stateMachine.transform.position, attackRange);
         foreach (var hit in hits)
         {
-            if (hit.CompareTag("Enemy"))
+            if (hit.gameObject != stateMachine.gameObject)
             {
-                var enemy = hit.GetComponent<EnemyController>();
-                if (enemy != null)
+                var target = hit.GetComponent<IDamageable>();
+                if (target != null)
                 {
-                    enemy.TakeDamage(controller.attackDamage, controller.toughnessDamage);
+                    target.TakeDamage(controller.attackDamage, controller.toughnessDamage);
                 }
             }
         }

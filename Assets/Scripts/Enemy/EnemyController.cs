@@ -1,16 +1,19 @@
 using UnityEngine;
 using UnityEngine.UI;
 
-public class EnemyController : MonoBehaviour
+public class EnemyController : MonoBehaviour, IDamageable
 {
-    [Header("Health")]
+    [Header("Stats Asset (数据驱动)")]
+    public CharacterStatsSO statsAsset;
+
+    [Header("Runtime Attributes")]
     public float maxHealth = 100f;
     public float currentHealth;
-
-    [Header("Toughness")]
     public float maxToughness = 100f;
     public float currentToughness;
     [HideInInspector] public bool isVulnerable;
+
+    [HideInInspector] public float vulnerableTimer; // 新增：每个怪物独立的破韧计时器
 
     [Header("Environmental Resonance (环境共鸣)")]
     public int resonanceStacks = 0;
@@ -33,27 +36,38 @@ public class EnemyController : MonoBehaviour
     public State deadState;
 
     [HideInInspector] public StateMachine stateMachine;
+    [HideInInspector] public Rigidbody rb;
     [HideInInspector] public bool isDead;
     [HideInInspector] public Transform playerTransform;
 
-    // 独立管理每个怪物的材质和初始颜色，防止多个怪物共享状态时颜色错乱
     private Renderer enemyRenderer;
     private Color originalColor;
 
-    private void Start()
+    private void Awake()
     {
-        currentHealth = maxHealth;
-        currentToughness = maxToughness;
-        resonanceTimer = resonanceInterval;
         stateMachine = GetComponent<StateMachine>();
-
-        // 记录当前怪物的独立材质与初始颜色
+        rb = GetComponent<Rigidbody>();
         enemyRenderer = GetComponent<Renderer>();
+
         if (enemyRenderer != null)
         {
             originalColor = enemyRenderer.material.color;
         }
 
+        // 数据驱动：加载属性配置
+        if (statsAsset != null)
+        {
+            maxHealth = statsAsset.maxHealth;
+            maxToughness = statsAsset.maxToughness;
+        }
+
+        currentHealth = maxHealth;
+        currentToughness = maxToughness;
+        resonanceTimer = resonanceInterval;
+    }
+
+    private void Start()
+    {
         var playerObj = GameObject.FindWithTag("Player");
         if (playerObj != null)
         {
@@ -74,7 +88,7 @@ public class EnemyController : MonoBehaviour
             if (resonanceStacks < maxResonanceStacks)
             {
                 resonanceStacks++;
-                Debug.Log($"【环境共鸣】层数上升: {resonanceStacks}/{maxResonanceStacks} (+{resonanceStacks * resonanceDamageBonus * 100}% 增伤)");
+                Debug.Log($"【环境共鸣】层数累加: {resonanceStacks}/{maxResonanceStacks} (+{resonanceStacks * resonanceDamageBonus * 100}% 增伤)");
 
                 if (resonanceStacks >= maxResonanceStacks)
                 {
@@ -84,7 +98,6 @@ public class EnemyController : MonoBehaviour
         }
     }
 
-    // 独立的破韧视觉变色控制（安全可靠）
     public void SetVulnerableVisual(bool enable)
     {
         if (enemyRenderer != null)
@@ -95,16 +108,16 @@ public class EnemyController : MonoBehaviour
 
     public void TriggerResonanceAOE()
     {
-        Debug.LogWarning("【环境共鸣爆发】共鸣满层！释放 8m AOE 爆发技能！");
+        Debug.LogWarning("【共鸣爆发】释放 8m AOE 伤害！");
         if (playerTransform != null)
         {
             float dist = Vector3.Distance(transform.position, playerTransform.position);
             if (dist <= aoeRadius)
             {
-                var player = playerTransform.GetComponent<PlayerController>();
-                if (player != null)
+                var damageable = playerTransform.GetComponent<IDamageable>();
+                if (damageable != null)
                 {
-                    player.TakeDamage(30f);
+                    damageable.TakeDamage(30f);
                 }
             }
         }
@@ -149,7 +162,7 @@ public class EnemyController : MonoBehaviour
     {
         resonanceStacks = 0;
         resonanceTimer = resonanceInterval;
-        Debug.Log("【机制触发】怪物被破韧！共鸣层数已清零重置！");
+        Debug.Log("【破韧触发】共鸣层数已重置！");
 
         if (stateMachine != null && vulnerableState != null)
         {
@@ -162,7 +175,12 @@ public class EnemyController : MonoBehaviour
         if (isDead) return;
         currentToughness = maxToughness;
         UpdateUI();
-        Debug.Log("【韧性重置】怪物韧性条已回满！");
+    }
+
+    public void HideUI()
+    {
+        if (healthBar != null) healthBar.gameObject.SetActive(false);
+        if (toughnessBar != null) toughnessBar.gameObject.SetActive(false);
     }
 
     public void UpdateUI()
