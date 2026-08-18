@@ -3,7 +3,8 @@ using UnityEngine.UI;
 
 public class EnemyController : MonoBehaviour, IDamageable
 {
-    [Header("Stats Asset (数据驱动)")]
+    [Header("Stats Asset (数据驱动/可选)")]
+    [Tooltip("可选：拖入配置好的 Stats 资产文件；若为空则使用下方默认属性")]
     public CharacterStatsSO statsAsset;
 
     [Header("Runtime Attributes")]
@@ -11,9 +12,10 @@ public class EnemyController : MonoBehaviour, IDamageable
     public float currentHealth;
     public float maxToughness = 100f;
     public float currentToughness;
-    [HideInInspector] public bool isVulnerable;
 
-    [HideInInspector] public float vulnerableTimer; // 新增：每个怪物独立的破韧计时器
+    [HideInInspector] public bool isVulnerable;
+    [HideInInspector] public float vulnerableTimer; // 独立破韧计时器（防止多怪计时污染）
+    [HideInInspector] public float attackTimer;     // 独立攻击后摇计时器
 
     [Header("Environmental Resonance (环境共鸣)")]
     public int resonanceStacks = 0;
@@ -40,6 +42,7 @@ public class EnemyController : MonoBehaviour, IDamageable
     [HideInInspector] public bool isDead;
     [HideInInspector] public Transform playerTransform;
 
+    // 实例级独立材质与颜色缓存
     private Renderer enemyRenderer;
     private Color originalColor;
 
@@ -54,7 +57,7 @@ public class EnemyController : MonoBehaviour, IDamageable
             originalColor = enemyRenderer.material.color;
         }
 
-        // 数据驱动：加载属性配置
+        // 数据驱动：从 SO 资产加载基础属性
         if (statsAsset != null)
         {
             maxHealth = statsAsset.maxHealth;
@@ -68,6 +71,7 @@ public class EnemyController : MonoBehaviour, IDamageable
 
     private void Start()
     {
+        // 缓存玩家引用，消除 Update 中的高频 FindWithTag
         var playerObj = GameObject.FindWithTag("Player");
         if (playerObj != null)
         {
@@ -81,6 +85,7 @@ public class EnemyController : MonoBehaviour, IDamageable
     {
         if (isDead || isVulnerable) return;
 
+        // 环境共鸣计时器与叠层
         resonanceTimer -= Time.deltaTime;
         if (resonanceTimer <= 0f)
         {
@@ -98,6 +103,7 @@ public class EnemyController : MonoBehaviour, IDamageable
         }
     }
 
+    // 独立的破韧视觉变色控制
     public void SetVulnerableVisual(bool enable)
     {
         if (enemyRenderer != null)
@@ -106,9 +112,10 @@ public class EnemyController : MonoBehaviour, IDamageable
         }
     }
 
+    // 满层 8m AOE 爆发
     public void TriggerResonanceAOE()
     {
-        Debug.LogWarning("【共鸣爆发】释放 8m AOE 伤害！");
+        Debug.LogWarning("【环境共鸣爆发】共鸣满层！释放 8m AOE 爆发伤害！");
         if (playerTransform != null)
         {
             float dist = Vector3.Distance(transform.position, playerTransform.position);
@@ -124,15 +131,18 @@ public class EnemyController : MonoBehaviour, IDamageable
         resonanceStacks = 0;
     }
 
+    // 计算共鸣增伤后的最终攻击力
     public float GetCalculatedAttackDamage(float baseDamage)
     {
         return baseDamage * (1f + resonanceStacks * resonanceDamageBonus);
     }
 
+    // IDamageable 接口实现（多态受击）
     public void TakeDamage(float damage, float toughnessDamage)
     {
         if (isDead) return;
 
+        // IDamageModifier 接口解耦伤害倍率计算
         if (stateMachine != null && stateMachine.CurrentState is IDamageModifier modifier)
         {
             damage = modifier.ModifyDamage(damage);
@@ -158,11 +168,12 @@ public class EnemyController : MonoBehaviour, IDamageable
         }
     }
 
+    // 破韧逻辑：打断并清零共鸣
     public void TriggerBreak()
     {
         resonanceStacks = 0;
         resonanceTimer = resonanceInterval;
-        Debug.Log("【破韧触发】共鸣层数已重置！");
+        Debug.Log("【破韧机制】怪物破韧！共鸣层数已清零重置！");
 
         if (stateMachine != null && vulnerableState != null)
         {
@@ -175,6 +186,7 @@ public class EnemyController : MonoBehaviour, IDamageable
         if (isDead) return;
         currentToughness = maxToughness;
         UpdateUI();
+        Debug.Log("【韧性重置】怪物韧性条回满！");
     }
 
     public void HideUI()
@@ -213,9 +225,11 @@ public class EnemyController : MonoBehaviour, IDamageable
 
     private void OnDrawGizmosSelected()
     {
+        // 红色线框：8m 共鸣 AOE 范围
         Gizmos.color = new Color(1f, 0f, 0f, 0.35f);
         Gizmos.DrawWireSphere(transform.position, aoeRadius);
 
+        // 黄色线框：近战攻击判定范围
         Gizmos.color = Color.yellow;
         Gizmos.DrawWireSphere(transform.position, 2.0f);
     }

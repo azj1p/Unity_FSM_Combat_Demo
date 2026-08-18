@@ -3,86 +3,91 @@ using UnityEngine;
 [CreateAssetMenu(fileName = "EnemyAttackState", menuName = "FSM/Enemy/AttackState")]
 public class EnemyAttackState : State
 {
-    [Tooltip("攻击间隔/后摇时间（秒）")]
-    public float attackTimer = 1.2f;
-    [Tooltip("基础攻击力")]
-    public float attackDamage = 15f;
-    [Tooltip("攻击判定距离")]
-    public float attackRange = 2.0f;
-
-    private float timer;
+    [Header("Attack Settings")]
+    public float attackDuration = 1.0f;     // 攻击动作与后摇总时长
+    public float baseAttackDamage = 15.0f;  // 基础攻击伤害
+    public float attackRange = 2.0f;        // 攻击有效判定距离
 
     public override void OnEnter(StateMachine stateMachine)
     {
-        timer = attackTimer;
-        ExecuteAttack(stateMachine);
-    }
-
-    public override void LogicUpdate(StateMachine stateMachine)
-    {
-        timer -= Time.deltaTime;
-    }
-
-    public override void TransitionChecks(StateMachine stateMachine)
-    {
-        // 攻击后摇/冷却结束
-        if (timer <= 0f)
-        {
-            var controller = stateMachine.GetComponent<EnemyController>();
-            if (controller == null || controller.playerTransform == null) return;
-
-            float distance = Vector3.Distance(
-                stateMachine.transform.position,
-                controller.playerTransform.position
-            );
-
-            if (distance > attackRange)
-            {
-                // 1. 玩家拉开了距离 -> 切换回追击状态
-                if (controller.chaseState != null)
-                {
-                    stateMachine.ChangeState(controller.chaseState);
-                }
-            }
-            else
-            {
-                // 2. 玩家仍留在攻击范围内 -> 重置计时器并再次发动攻击（解决原地发呆问题）
-                timer = attackTimer;
-                ExecuteAttack(stateMachine);
-            }
-        }
-    }
-
-    // 抽离独立的攻击结算逻辑
-    private void ExecuteAttack(StateMachine stateMachine)
-    {
         var controller = stateMachine.GetComponent<EnemyController>();
-        if (controller == null || controller.playerTransform == null) return;
+        if (controller == null) return;
 
-        // 面向玩家
-        Vector3 targetPos = controller.playerTransform.position;
-        targetPos.y = stateMachine.transform.position.y;
-        stateMachine.transform.LookAt(targetPos);
+        // 设置当前怪物专属的攻击计时器（避免 SO 共享变量冲突）
+        controller.attackTimer = attackDuration;
 
-        // 结合共鸣层数计算伤害
-        float finalDamage = controller.GetCalculatedAttackDamage(attackDamage);
-        Debug.Log($"【FSM驱动】敌人向玩家发起攻击！造成伤害: {finalDamage:F1} (基础 {attackDamage})");
+        // 攻击时清空水平残余物理速度，防止滑步
+        var rb = stateMachine.GetComponent<Rigidbody>();
+        if (rb != null && !rb.isKinematic)
+        {
+            rb.linearVelocity = new Vector3(0, rb.linearVelocity.y, 0);
+        }
 
-        // 尝试触发攻击动画
+        // 面朝玩家
+        if (controller.playerTransform != null)
+        {
+            Vector3 lookTarget = controller.playerTransform.position;
+            lookTarget.y = stateMachine.transform.position.y;
+            stateMachine.transform.LookAt(lookTarget);
+        }
+
+        // 触发攻击动画
         var animator = stateMachine.GetComponent<Animator>();
         if (animator != null)
         {
             animator.SetTrigger("Attack");
         }
 
-        // 判定伤害
-        float distance = Vector3.Distance(stateMachine.transform.position, controller.playerTransform.position);
-        if (distance <= attackRange)
+        // 动态计算共鸣增伤并进行多态伤害结算
+        float finalDamage = controller.GetCalculatedAttackDamage(baseAttackDamage);
+        if (controller.playerTransform != null)
         {
-            var player = controller.playerTransform.GetComponent<PlayerController>();
-            if (player != null)
+            float distance = Vector3.Distance(stateMachine.transform.position, controller.playerTransform.position);
+            if (distance <= attackRange)
             {
-                player.TakeDamage(finalDamage);
+                var damageable = controller.playerTransform.GetComponent<IDamageable>();
+                if (damageable != null)
+                {
+                    damageable.TakeDamage(finalDamage);
+                    Debug.Log($"【敌人攻击】命中玩家！造成 {finalDamage} 点伤害 (共鸣加成: {controller.resonanceStacks} 层)");
+                }
+            }
+        }
+    }
+
+    public override void LogicUpdate(StateMachine stateMachine)
+    {
+        var controller = stateMachine.GetComponent<EnemyController>();
+        if (controller != null)
+        {
+            controller.attackTimer -= Time.deltaTime;
+        }
+    }
+
+    public override void TransitionChecks(StateMachine stateMachine)
+    {
+        var controller = stateMachine.GetComponent<EnemyController>();
+        if (controller == null || controller.playerTransform == null) return;
+
+        // 攻击后摇结束，进行状态闭环流转判定（防止发呆死锁）
+        if (controller.attackTimer <= 0f)
+        {
+            float distance = Vector3.Distance(stateMachine.transform.position, controller.playerTransform.position);
+
+            // 玩家仍在攻击范围内 -> 连续攻击循环
+            if (distance <= attackRange && controller.attackState != null)
+            {
+                stateMachine.ChangeState(controller.attackState);
+            }
+            // 玩家跑远 -> 切入追击状态
+            else if (controller.chaseState != null)
+            {
+                stateMachine.ChangeState(controller.chaseState);
+            }
+            // 默认兜底切回待机
+            else if (controller.idleState != null)
+            {
+                stateMachine.ChangeState(controller.idleState);
             }
         }
     }

@@ -3,8 +3,7 @@ using UnityEngine.UI;
 
 public class PlayerController : MonoBehaviour, IDamageable
 {
-    [Header("Stats Asset (数据驱动)")]
-    [Tooltip("可选：拖入配置好的 Stats 资产文件；若为空则使用下方默认值")]
+    [Header("Stats Asset (数据驱动/可选)")]
     public CharacterStatsSO statsAsset;
 
     [Header("Runtime Attributes")]
@@ -22,6 +21,7 @@ public class PlayerController : MonoBehaviour, IDamageable
     public State idleState;
     public State moveState;
     public State attackState;
+    public State deadState; // 可选：若配置了玩家死亡状态
 
     [HideInInspector] public StateMachine stateMachine;
     [HideInInspector] public Rigidbody rb;
@@ -29,11 +29,9 @@ public class PlayerController : MonoBehaviour, IDamageable
 
     private void Awake()
     {
-        // 缓存组件，消除运行期 GetComponent 开销
         stateMachine = GetComponent<StateMachine>();
         rb = GetComponent<Rigidbody>();
 
-        // 数据驱动：从 SO 加载数值
         if (statsAsset != null)
         {
             maxHealth = statsAsset.maxHealth;
@@ -63,7 +61,8 @@ public class PlayerController : MonoBehaviour, IDamageable
         currentHealth = Mathf.Clamp(currentHealth, 0, maxHealth);
         UpdateUI();
 
-        Debug.Log($"玩家受击！生命剩余: {currentHealth}/{maxHealth}");
+        Debug.Log($"【玩家受击】受到 {damage} 点伤害！剩余血量: {currentHealth}/{maxHealth}");
+
         if (currentHealth <= 0)
         {
             Die();
@@ -79,9 +78,36 @@ public class PlayerController : MonoBehaviour, IDamageable
         }
     }
 
+    public void HideUI()
+    {
+        if (healthBar != null)
+        {
+            healthBar.gameObject.SetActive(false);
+        }
+    }
+
     public void Die()
     {
-        isDead = true;
-        Debug.Log("【玩家死亡】游戏结束！");
+        if (isDead) return;
+
+        // 由 FSM 驱动进入死亡状态
+        if (stateMachine != null && deadState != null)
+        {
+            stateMachine.ChangeState(deadState);
+        }
+        else
+        {
+            // 兜底逻辑
+            isDead = true;
+            HideUI();
+            if (rb != null)
+            {
+                rb.linearVelocity = Vector3.zero;
+                rb.isKinematic = true;
+            }
+            var animator = GetComponent<Animator>();
+            if (animator != null) animator.SetTrigger("Die");
+            if (stateMachine != null) stateMachine.enabled = false;
+        }
     }
 }
