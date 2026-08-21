@@ -1,72 +1,68 @@
 using UnityEngine;
+using UnityEngine.InputSystem;
 using UnityEngine.SceneManagement;
 
 [CreateAssetMenu(fileName = "PlayerDeadState", menuName = "FSM/Player/DeadState")]
-public class PlayerDeadState : State
+public class PlayerDeadState : State<PlayerController>
 {
     [Header("Settings")]
-    [Tooltip("倒地动画播放时长（秒），结束后暂停游戏")]
     public float delayBeforePause = 1.5f;
 
     private float timer;
     private bool isPaused;
 
-    public override void OnEnter(StateMachine stateMachine)
+    public override void OnEnter(PlayerController player)
     {
         timer = delayBeforePause;
         isPaused = false;
 
-        var controller = stateMachine.GetComponent<PlayerController>();
-        if (controller != null)
+        if (player != null)
         {
-            controller.isDead = true;
-            controller.HideUI();
+            player.isDead = true;
+            player.HideUI();
         }
 
-        // 1. 冻结玩家刚体物理
-        var rb = stateMachine.GetComponent<Rigidbody>();
+        var rb = player.GetComponent<Rigidbody>();
         if (rb != null)
         {
             rb.linearVelocity = Vector3.zero;
             rb.isKinematic = true;
         }
 
-        // 2. 触发死亡倒地动画
-        var animator = stateMachine.GetComponent<Animator>();
-        if (animator != null)
+        var anim = player.GetComponent<Animator>();
+        if (anim != null)
         {
-            animator.SetTrigger("Die");
+            anim.SetTrigger("Die");
         }
 
         Debug.Log("【玩家死亡】播放死亡动作，1.5 秒后暂停游戏...");
     }
 
-    public override void LogicUpdate(StateMachine stateMachine)
+    public override void LogicUpdate(PlayerController player)
     {
-        // 倒计时阶段（使用常规时间）
         if (!isPaused)
         {
             timer -= Time.deltaTime;
             if (timer <= 0f)
             {
                 isPaused = true;
-                Time.timeScale = 0f; // 冻结游戏时间（暂停场景所有物体）
+                Time.timeScale = 0f;
                 Debug.LogWarning("【GAME OVER】游戏已暂停！按下 [R] 键重新开始关卡。");
             }
         }
 
-        // 暂停后检测重开按键（Input 依然生效）
-        if (Input.GetKeyDown(KeyCode.R))
+        // 使用新输入系统检测 R 键重开
+        if (Keyboard.current != null && Keyboard.current.rKey.wasPressedThisFrame)
         {
-            Time.timeScale = 1f; // 重置时间缩放，防止新场景继续卡住
+            Time.timeScale = 1f;
             SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
         }
     }
 
-    public override void TransitionChecks(StateMachine stateMachine) { }
+    public override void TransitionChecks(PlayerController player) { }
 
-    public override void OnExit(StateMachine stateMachine)
+    public override void OnExit(PlayerController player)
     {
-        Time.timeScale = 1f; // 退出状态时恢复时间流速
+        Time.timeScale = 1f;
     }
 }

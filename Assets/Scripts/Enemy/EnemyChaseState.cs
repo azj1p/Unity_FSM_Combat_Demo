@@ -1,52 +1,46 @@
 using UnityEngine;
 
 [CreateAssetMenu(fileName = "EnemyChaseState", menuName = "FSM/Enemy/ChaseState")]
-public class EnemyChaseState : State
+public class EnemyChaseState : State<EnemyController>
 {
     public float chaseSpeed = 3.5f;
     public float attackRange = 1.5f;
 
-    public override void LogicUpdate(StateMachine stateMachine)
+    public override void LogicUpdate(EnemyController enemy)
     {
-        var controller = stateMachine.GetComponent<EnemyController>();
-        if (controller == null || controller.playerTransform == null) return;
+        if (enemy == null || enemy.playerTransform == null) return;
 
-        Vector3 targetPos = controller.playerTransform.position;
-        targetPos.y = stateMachine.transform.position.y;
+        Vector3 targetPos = enemy.playerTransform.position;
+        targetPos.y = enemy.transform.position.y;
+        enemy.transform.LookAt(targetPos);
 
-        // 转向目标
-        stateMachine.transform.LookAt(targetPos);
-
-        // 使用物理刚体位移防止穿模重叠
-        var rb = stateMachine.GetComponent<Rigidbody>();
-        if (rb != null)
+        if (enemy.rb != null)
         {
             Vector3 nextPos = Vector3.MoveTowards(
-                rb.position,
+                enemy.rb.position,
                 targetPos,
                 chaseSpeed * Time.deltaTime
             );
-            rb.MovePosition(nextPos);
+            enemy.rb.MovePosition(nextPos);
         }
         else
         {
-            stateMachine.transform.position = Vector3.MoveTowards(
-                stateMachine.transform.position,
+            enemy.transform.position = Vector3.MoveTowards(
+                enemy.transform.position,
                 targetPos,
                 chaseSpeed * Time.deltaTime
             );
         }
     }
 
-    public override void TransitionChecks(StateMachine stateMachine)
+    public override void TransitionChecks(EnemyController enemy)
     {
-        var controller = stateMachine.GetComponent<EnemyController>();
-        if (controller == null || controller.playerTransform == null) return;
+        if (enemy == null || enemy.playerTransform == null) return;
 
-        float distance = Vector3.Distance(stateMachine.transform.position, controller.playerTransform.position);
-        if (distance <= attackRange && controller.attackState != null)
+        float distance = Vector3.Distance(enemy.transform.position, enemy.playerTransform.position);
+        if (distance <= attackRange && enemy.attackState != null)
         {
-            stateMachine.ChangeState(controller.attackState);
+            enemy.stateMachine.ChangeState(enemy.attackState);
         }
     }
 }

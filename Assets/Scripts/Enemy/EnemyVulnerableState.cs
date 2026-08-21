@@ -1,68 +1,54 @@
 using UnityEngine;
 
 [CreateAssetMenu(fileName = "EnemyVulnerableState", menuName = "FSM/Enemy/VulnerableState")]
-public class EnemyVulnerableState : State, IDamageModifier
+public class EnemyVulnerableState : State<EnemyController>, IDamageModifier
 {
     [Header("Vulnerable Settings")]
-    [Tooltip("破韧虚弱持续时间（秒）")]
     public float vulnerableDuration = 3.0f;
-    [Tooltip("破韧状态下的受击伤害倍率")]
     public float damageMultiplier = 1.25f;
 
-    public override void OnEnter(StateMachine stateMachine)
+    public override void OnEnter(EnemyController enemy)
     {
-        var controller = stateMachine.GetComponent<EnemyController>();
-        if (controller != null)
-        {
-            controller.isVulnerable = true;
-            controller.vulnerableTimer = vulnerableDuration; // 给当前怪物独立的计时器赋值
-            controller.SetVulnerableVisual(true);
-        }
+        if (enemy == null) return;
+        enemy.isVulnerable = true;
+        enemy.vulnerableTimer = vulnerableDuration;
+        enemy.SetVulnerableVisual(true);
 
-        var animator = stateMachine.GetComponent<Animator>();
+        var animator = enemy.GetComponent<Animator>();
         if (animator != null)
         {
             animator.SetTrigger("Vulnerable");
         }
 
-        Debug.Log($"【FSM驱动】怪物 [{stateMachine.name}] 进入破韧状态，独立计时 {vulnerableDuration} 秒！");
+        Debug.Log($"【FSM驱动】怪物 [{enemy.name}] 进入破韧状态，独立计时 {vulnerableDuration} 秒！");
     }
 
-    public override void LogicUpdate(StateMachine stateMachine)
+    public override void LogicUpdate(EnemyController enemy)
     {
-        var controller = stateMachine.GetComponent<EnemyController>();
-        if (controller != null)
+        if (enemy != null)
         {
-            // 扣减当前怪物自己的计时器
-            controller.vulnerableTimer -= Time.deltaTime;
+            enemy.vulnerableTimer -= Time.deltaTime;
         }
     }
 
-    public override void TransitionChecks(StateMachine stateMachine)
+    public override void TransitionChecks(EnemyController enemy)
     {
-        var controller = stateMachine.GetComponent<EnemyController>();
-        if (controller != null)
+        if (enemy == null) return;
+        if (enemy.vulnerableTimer <= 0f)
         {
-            // 仅根据当前怪物自己的计时器判断是否恢复
-            if (controller.vulnerableTimer <= 0f)
+            enemy.ResetToughness();
+            if (enemy.chaseState != null)
             {
-                controller.ResetToughness();
-                if (controller.chaseState != null)
-                {
-                    stateMachine.ChangeState(controller.chaseState);
-                }
+                enemy.stateMachine.ChangeState(enemy.chaseState);
             }
         }
     }
 
-    public override void OnExit(StateMachine stateMachine)
+    public override void OnExit(EnemyController enemy)
     {
-        var controller = stateMachine.GetComponent<EnemyController>();
-        if (controller != null)
-        {
-            controller.isVulnerable = false;
-            controller.SetVulnerableVisual(false);
-        }
+        if (enemy == null) return;
+        enemy.isVulnerable = false;
+        enemy.SetVulnerableVisual(false);
     }
 
     public float ModifyDamage(float baseDamage)

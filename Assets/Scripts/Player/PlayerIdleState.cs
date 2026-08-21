@@ -1,50 +1,48 @@
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 [CreateAssetMenu(fileName = "PlayerIdleState", menuName = "FSM/Player/IdleState")]
-public class PlayerIdleState : State
+public class PlayerIdleState : State<PlayerController>
 {
-    public override void OnEnter(StateMachine stateMachine)
+    public override void LogicUpdate(PlayerController player)
     {
-        var rb = stateMachine.GetComponent<Rigidbody>();
-        if (rb != null && !rb.isKinematic)
+        if (player == null) return;
+
+        // 跳跃检测（新输入系统：Space 键 + 地面判定）
+        if (Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame)
         {
-            rb.linearVelocity = new Vector3(0, rb.linearVelocity.y, 0);
+            if (player.rb != null && Mathf.Abs(player.rb.linearVelocity.y) < 0.1f)
+            {
+                player.rb.AddForce(Vector3.up * player.jumpForce, ForceMode.Impulse);
+            }
         }
     }
 
-    public override void TransitionChecks(StateMachine stateMachine)
+    public override void TransitionChecks(PlayerController player)
     {
-        var controller = stateMachine.GetComponent<PlayerController>();
-        if (controller == null) return;
+        if (player == null) return;
 
-        // 空格跳跃
-        if (Input.GetKeyDown(KeyCode.Space))
+        // 攻击触发检测（J 键或鼠标左键）
+        bool attackPressed = (Keyboard.current != null && Keyboard.current.jKey.wasPressedThisFrame)
+                          || (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame);
+
+        if (attackPressed && player.attackState != null)
         {
-            var rb = stateMachine.GetComponent<Rigidbody>();
-            if (rb != null && Physics.Raycast(stateMachine.transform.position, Vector3.down, 1.2f))
-            {
-                rb.AddForce(Vector3.up * controller.jumpForce, ForceMode.Impulse);
-            }
-        }
-
-        float h = Input.GetAxisRaw("Horizontal");
-        float v = Input.GetAxisRaw("Vertical");
-        bool isMoving = (Mathf.Abs(h) > 0.01f || Mathf.Abs(v) > 0.01f) ||
-                        Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.S) ||
-                        Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.D);
-
-        if (isMoving && controller.moveState != null)
-        {
-            stateMachine.ChangeState(controller.moveState);
+            player.stateMachine.ChangeState(player.attackState);
             return;
         }
 
-        if (Input.GetKeyDown(KeyCode.J) || Input.GetMouseButtonDown(0))
+        // 移动触发检测（WASD / 方向键）
+        bool isMoving = false;
+        if (Keyboard.current != null)
         {
-            if (controller.attackState != null)
-            {
-                stateMachine.ChangeState(controller.attackState);
-            }
+            isMoving = Keyboard.current.wKey.isPressed || Keyboard.current.sKey.isPressed ||
+                       Keyboard.current.aKey.isPressed || Keyboard.current.dKey.isPressed;
+        }
+
+        if (isMoving && player.moveState != null)
+        {
+            player.stateMachine.ChangeState(player.moveState);
         }
     }
 }

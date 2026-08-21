@@ -1,49 +1,43 @@
 using UnityEngine;
 
 [CreateAssetMenu(fileName = "PlayerAttackState", menuName = "FSM/Player/AttackState")]
-public class PlayerAttackState : State
+public class PlayerAttackState : State<PlayerController>
 {
-    public float attackDuration = 0.4f;
-    public float attackRange = 2.5f;
+    public float attackDuration = 0.5f;
+    public float attackRadius = 2.0f;
     private float timer;
 
-    public override void OnEnter(StateMachine stateMachine)
+    public override void OnEnter(PlayerController player)
     {
         timer = attackDuration;
-        var controller = stateMachine.GetComponent<PlayerController>();
-        if (controller == null) return;
 
-        Debug.Log("【玩家攻击】挥刀判定！");
+        var anim = player.GetComponent<Animator>();
+        if (anim != null) anim.SetTrigger("Attack");
 
-        // 使用 IDamageable 接口进行多态伤害结算
-        Collider[] hits = Physics.OverlapSphere(stateMachine.transform.position, attackRange);
+        Collider[] hits = Physics.OverlapSphere(player.transform.position + player.transform.forward, attackRadius);
         foreach (var hit in hits)
         {
-            if (hit.gameObject != stateMachine.gameObject)
+            if (hit.gameObject != player.gameObject)
             {
-                var target = hit.GetComponent<IDamageable>();
-                if (target != null)
+                var damageable = hit.GetComponent<IDamageable>();
+                if (damageable != null)
                 {
-                    target.TakeDamage(controller.attackDamage, controller.toughnessDamage);
+                    damageable.TakeDamage(player.attackDamage, player.toughnessDamage);
                 }
             }
         }
     }
 
-    public override void LogicUpdate(StateMachine stateMachine)
+    public override void LogicUpdate(PlayerController player)
     {
         timer -= Time.deltaTime;
     }
 
-    public override void TransitionChecks(StateMachine stateMachine)
+    public override void TransitionChecks(PlayerController player)
     {
-        if (timer <= 0f)
+        if (timer <= 0f && player.idleState != null)
         {
-            var controller = stateMachine.GetComponent<PlayerController>();
-            if (controller != null && controller.idleState != null)
-            {
-                stateMachine.ChangeState(controller.idleState);
-            }
+            player.stateMachine.ChangeState(player.idleState);
         }
     }
 }

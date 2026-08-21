@@ -1,96 +1,79 @@
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 [CreateAssetMenu(fileName = "PlayerMoveState", menuName = "FSM/Player/MoveState")]
-public class PlayerMoveState : State
+public class PlayerMoveState : State<PlayerController>
 {
-    public override void LogicUpdate(StateMachine stateMachine)
+    public override void LogicUpdate(PlayerController player)
     {
-        var controller = stateMachine.GetComponent<PlayerController>();
-        if (controller == null) return;
+        if (player == null) return;
 
-        float h = Input.GetAxisRaw("Horizontal");
-        float v = Input.GetAxisRaw("Vertical");
+        // 1. 读取输入
+        float h = 0f;
+        float v = 0f;
 
-        if (h == 0 && v == 0)
+        if (Keyboard.current != null)
         {
-            if (Input.GetKey(KeyCode.W)) v += 1f;
-            if (Input.GetKey(KeyCode.S)) v -= 1f;
-            if (Input.GetKey(KeyCode.D)) h += 1f;
-            if (Input.GetKey(KeyCode.A)) h -= 1f;
+            if (Keyboard.current.aKey.isPressed || Keyboard.current.leftArrowKey.isPressed) h -= 1f;
+            if (Keyboard.current.dKey.isPressed || Keyboard.current.rightArrowKey.isPressed) h += 1f;
+            if (Keyboard.current.wKey.isPressed || Keyboard.current.upArrowKey.isPressed) v += 1f;
+            if (Keyboard.current.sKey.isPressed || Keyboard.current.downArrowKey.isPressed) v -= 1f;
         }
 
-        Vector3 inputDir = new Vector3(h, 0, v).normalized;
+        // 2. 基于摄像机朝向投影计算移动方向（工业级第三人称视口对齐）
+        Transform cam = Camera.main != null ? Camera.main.transform : null;
+        Vector3 moveDir = Vector3.zero;
 
-        if (inputDir.magnitude > 0.05f)
+        if (cam != null)
         {
-            Vector3 moveDir = inputDir;
-            if (Camera.main != null)
-            {
-                Vector3 camForward = Camera.main.transform.forward;
-                Vector3 camRight = Camera.main.transform.right;
-                camForward.y = 0f;
-                camRight.y = 0f;
-                camForward.Normalize();
-                camRight.Normalize();
-                moveDir = (camForward * inputDir.z + camRight * inputDir.x).normalized;
-            }
+            Vector3 camForward = Vector3.ProjectOnPlane(cam.forward, Vector3.up).normalized;
+            Vector3 camRight = Vector3.ProjectOnPlane(cam.right, Vector3.up).normalized;
+            moveDir = (camForward * v + camRight * h).normalized;
+        }
+        else
+        {
+            moveDir = new Vector3(h, 0, v).normalized;
+        }
 
-            if (moveDir != Vector3.zero)
-            {
-                Quaternion targetRot = Quaternion.LookRotation(moveDir);
-                stateMachine.transform.rotation = Quaternion.Slerp(
-                    stateMachine.transform.rotation,
-                    targetRot,
-                    15f * Time.deltaTime
-                );
-            }
+        if (moveDir.magnitude > 0.1f)
+        {
+            player.transform.position += moveDir * player.moveSpeed * Time.deltaTime;
+            player.transform.forward = moveDir;
+        }
 
-            var rb = stateMachine.GetComponent<Rigidbody>();
-            if (rb != null)
+        // 3. 移动中跳跃检测
+        if (Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame)
+        {
+            if (player.rb != null && Mathf.Abs(player.rb.linearVelocity.y) < 0.1f)
             {
-                Vector3 targetPos = rb.position + moveDir * (controller.moveSpeed * Time.deltaTime);
-                rb.MovePosition(targetPos);
-            }
-            else
-            {
-                stateMachine.transform.position += moveDir * (controller.moveSpeed * Time.deltaTime);
+                player.rb.AddForce(Vector3.up * player.jumpForce, ForceMode.Impulse);
             }
         }
     }
 
-    public override void TransitionChecks(StateMachine stateMachine)
+    public override void TransitionChecks(PlayerController player)
     {
-        var controller = stateMachine.GetComponent<PlayerController>();
-        if (controller == null) return;
+        if (player == null) return;
 
-        // 跳跃检测 (Space 键 + 地面检测)
-        if (Input.GetKeyDown(KeyCode.Space))
+        bool attackPressed = (Keyboard.current != null && Keyboard.current.jKey.wasPressedThisFrame)
+                          || (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame);
+
+        if (attackPressed && player.attackState != null)
         {
-            var rb = stateMachine.GetComponent<Rigidbody>();
-            if (rb != null && Physics.Raycast(stateMachine.transform.position, Vector3.down, 1.2f))
-            {
-                rb.AddForce(Vector3.up * controller.jumpForce, ForceMode.Impulse);
-            }
-        }
-
-        float h = Input.GetAxisRaw("Horizontal");
-        float v = Input.GetAxisRaw("Vertical");
-        bool hasInput = (Mathf.Abs(h) > 0.01f || Mathf.Abs(v) > 0.01f) ||
-                        Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.S) ||
-                        Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.D);
-
-        if (!hasInput && controller.idleState != null)
-        {
-            stateMachine.ChangeState(controller.idleState);
+            player.stateMachine.ChangeState(player.attackState);
             return;
         }
 
-        if (Input.GetKeyDown(KeyCode.J) || Input.GetMouseButtonDown(0))
+        bool isMoving = false;
+        if (Keyboard.current != null)
         {
-            if (controller.attackState != null)
-            {
-                stateMachine.ChangeState(controller.attackState);
-            }
+            isMoving = Keyboard.current.wKey.isPressed || Keyboard.current.sKey.isPressed ||
+                       Keyboard.current.aKey.isPressed || Keyboard.current.dKey.isPressed;
+        }
+
+        if (!isMoving && player.idleState != null)
+        {
+            player.stateMachine.ChangeState(player.idleState);
         }
     }
 }

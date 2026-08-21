@@ -1,77 +1,66 @@
 using UnityEngine;
+using UnityEngine.InputSystem;
 
-// 【玩家视角】第三人称自由轨道相机，实现鼠标无缝旋转视角、锁屏及跟随玩家
 public class OrbitCameraController : MonoBehaviour
 {
-    [Header("跟随目标 (Player)")]
+    [Header("Target & Distance")]
     public Transform target;
+    public float distance = 5.0f;
+    public float minDistance = 2.0f;
+    public float maxDistance = 10.0f;
 
-    [Header("第三人称视角设置")]
-    public float distance = 5.0f;          // 相机距离玩家的距离
-    public float targetHeight = 1.5f;      // 相机看向玩家的高度（胸部/头部）
-    public float mouseSensitivity = 3.0f;  // 鼠标灵敏度
-    public float minVerticalAngle = -20f;  // 最小俯角
-    public float maxVerticalAngle = 70f;   // 最大仰角
+    [Header("Sensitivity & Smoothing (视角灵敏度)")]
+    [Tooltip("鼠标水平旋转灵敏度")]
+    public float xSpeed = 0.2f;
+    [Tooltip("鼠标垂直旋转灵敏度")]
+    public float ySpeed = 0.2f;
 
-    private float currentX = 0.0f;
-    private float currentY = 20.0f;
+    [Header("Angle Limits (角度限制)")]
+    public float yMinLimit = -20f;
+    public float yMaxLimit = 75f;
+
+    public bool clampHorizontal = false;
+    public float xMinLimit = -90f;
+    public float xMaxLimit = 90f;
+
+    private float x = 0.0f;
+    private float y = 0.0f;
 
     private void Start()
     {
-        if (target != null)
-        {
-            Vector3 angles = transform.eulerAngles;
-            currentX = angles.y;
-            currentY = angles.x;
-        }
+        Vector3 angles = transform.eulerAngles;
+        x = angles.y;
+        y = angles.x;
 
-        LockCursor();
-    }
-
-    private void Update()
-    {
-        // 按 ESC 键临时解锁光标，点击画面重新锁定
-        if (Input.GetKeyDown(KeyCode.Escape))
-        {
-            UnlockCursor();
-        }
-
-        if (Input.GetMouseButtonDown(0) && Cursor.lockState == CursorLockMode.None)
-        {
-            LockCursor();
-        }
+        Cursor.lockState = CursorLockMode.Locked;
+        Cursor.visible = false;
     }
 
     private void LateUpdate()
     {
         if (target == null) return;
 
-        // 鼠标直接控制视角旋转
-        if (Cursor.lockState == CursorLockMode.Locked)
+        // 新输入系统读取每帧像素偏移（不再错误乘以 Time.deltaTime）
+        if (Mouse.current != null)
         {
-            currentX += Input.GetAxis("Mouse X") * mouseSensitivity;
-            currentY -= Input.GetAxis("Mouse Y") * mouseSensitivity;
-            currentY = Mathf.Clamp(currentY, minVerticalAngle, maxVerticalAngle);
+            Vector2 mouseDelta = Mouse.current.delta.ReadValue();
+            x += mouseDelta.x * xSpeed;
+            y -= mouseDelta.y * ySpeed;
         }
 
-        // 计算相机的旋转与位置
-        Quaternion rotation = Quaternion.Euler(currentY, currentX, 0);
-        Vector3 targetPos = target.position + Vector3.up * targetHeight;
-        Vector3 position = targetPos - (rotation * Vector3.forward * distance);
+        // 垂直仰角限制
+        y = Mathf.Clamp(y, yMinLimit, yMaxLimit);
+
+        if (clampHorizontal)
+        {
+            x = Mathf.Clamp(x, xMinLimit, xMaxLimit);
+        }
+
+        Quaternion rotation = Quaternion.Euler(y, x, 0);
+        Vector3 negDistance = new Vector3(0.0f, 0.0f, -distance);
+        Vector3 position = rotation * negDistance + target.position + Vector3.up * 1.5f;
 
         transform.rotation = rotation;
         transform.position = position;
-    }
-
-    private void LockCursor()
-    {
-        Cursor.lockState = CursorLockMode.Locked;
-        Cursor.visible = false;
-    }
-
-    private void UnlockCursor()
-    {
-        Cursor.lockState = CursorLockMode.None;
-        Cursor.visible = true;
     }
 }

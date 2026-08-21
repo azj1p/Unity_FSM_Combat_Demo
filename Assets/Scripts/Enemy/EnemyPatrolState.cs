@@ -1,22 +1,25 @@
 using UnityEngine;
 
-// 【敌人状态】巡逻状态，控制敌人在设定范围内左右来回巡逻，发现玩家时切入追击
 [CreateAssetMenu(fileName = "EnemyPatrolState", menuName = "FSM/Enemy/PatrolState")]
-public class EnemyPatrolState : State
+public class EnemyPatrolState : State<EnemyController>
 {
     public float patrolSpeed = 2f;
     public float patrolDistance = 3f;
     private Vector3 startPos;
     private bool movingRight = true;
 
-    public override void OnEnter(StateMachine stateMachine)
+    public override void OnEnter(EnemyController enemy)
     {
-        startPos = stateMachine.transform.position;
+        if (enemy != null)
+        {
+            startPos = enemy.transform.position;
+        }
     }
 
-    public override void LogicUpdate(StateMachine stateMachine)
+    public override void LogicUpdate(EnemyController enemy)
     {
-        Transform t = stateMachine.transform;
+        if (enemy == null) return;
+        Transform t = enemy.transform;
         if (movingRight)
         {
             t.Translate(Vector3.right * patrolSpeed * Time.deltaTime);
@@ -29,19 +32,15 @@ public class EnemyPatrolState : State
         }
     }
 
-    public override void TransitionChecks(StateMachine stateMachine)
+    public override void TransitionChecks(EnemyController enemy)
     {
-        GameObject player = GameObject.FindWithTag("Player");
-        if (player != null)
+        if (enemy == null) return;
+        if (enemy.playerTransform != null)
         {
-            float dist = Vector3.Distance(stateMachine.transform.position, player.transform.position);
-            if (dist <= 6f)
+            float dist = Vector3.Distance(enemy.transform.position, enemy.playerTransform.position);
+            if (dist <= 6f && enemy.chaseState != null)
             {
-                var enemy = stateMachine.GetComponent<EnemyController>();
-                if (enemy != null && enemy.chaseState != null)
-                {
-                    enemy.GetComponent<StateMachine>().ChangeState(Instantiate(enemy.chaseState));
-                }
+                enemy.stateMachine.ChangeState(enemy.chaseState);
             }
         }
     }

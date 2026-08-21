@@ -3,8 +3,11 @@ using UnityEngine.UI;
 
 public class EnemyController : MonoBehaviour, IDamageable
 {
-    [Header("Stats Asset (数据驱动/可选)")]
-    [Tooltip("可选：拖入配置好的 Stats 资产文件；若为空则使用下方默认属性")]
+    [Header("Enemy Classification (敌人分类)")]
+    [Tooltip("Normal(小怪:破韧/击杀-1层) | Elite(精英:重置为0) | Boss(首领:重置为0+推条25%)")]
+    public EnemyRank rank = EnemyRank.Normal;
+
+    [Header("Stats Asset (数据驱动)")]
     public CharacterStatsSO statsAsset;
 
     [Header("Runtime Attributes")]
@@ -14,16 +17,11 @@ public class EnemyController : MonoBehaviour, IDamageable
     public float currentToughness;
 
     [HideInInspector] public bool isVulnerable;
-    [HideInInspector] public float vulnerableTimer; // 独立破韧计时器（防止多怪计时污染）
-    [HideInInspector] public float attackTimer;     // 独立攻击后摇计时器
+    [HideInInspector] public float vulnerableTimer;
+    [HideInInspector] public float attackTimer;
 
-    [Header("Environmental Resonance (环境共鸣)")]
-    public int resonanceStacks = 0;
-    public int maxResonanceStacks = 3;
-    public float resonanceDamageBonus = 0.1f;
-    public float resonanceInterval = 6.0f;
-    public float aoeRadius = 8.0f;
-    private float resonanceTimer;
+    // 单一事实源：共鸣层数统一通过单例读取，消除冗余字段
+    public int resonanceStacks => EnvironmentalResonance.Instance != null ? EnvironmentalResonance.Instance.resonanceStacks : 0;
 
     [Header("UI")]
     public Slider healthBar;
@@ -42,22 +40,25 @@ public class EnemyController : MonoBehaviour, IDamageable
     [HideInInspector] public bool isDead;
     [HideInInspector] public Transform playerTransform;
 
-    // 实例级独立材质与颜色缓存
+    // 工业级材质改色：MaterialPropertyBlock 零内存分配、不破坏合批
     private Renderer enemyRenderer;
-    private Color originalColor;
+    private MaterialPropertyBlock mpb;
+    private Color originalColor = Color.white;
+    private static readonly int BaseMapColorId = Shader.PropertyToID("_BaseColor");
+    private static readonly int LegacyColorId = Shader.PropertyToID("_Color");
 
     private void Awake()
     {
         stateMachine = GetComponent<StateMachine>();
         rb = GetComponent<Rigidbody>();
         enemyRenderer = GetComponent<Renderer>();
+        mpb = new MaterialPropertyBlock();
 
-        if (enemyRenderer != null)
+        if (enemyRenderer != null && enemyRenderer.sharedMaterial != null)
         {
-            originalColor = enemyRenderer.material.color;
+            originalColor = enemyRenderer.sharedMaterial.color;
         }
 
-        // 数据驱动：从 SO 资产加载基础属性
         if (statsAsset != null)
         {
             maxHealth = statsAsset.maxHealth;
@@ -66,12 +67,10 @@ public class EnemyController : MonoBehaviour, IDamageable
 
         currentHealth = maxHealth;
         currentToughness = maxToughness;
-        resonanceTimer = resonanceInterval;
     }
 
     private void Start()
     {
-        // 缓存玩家引用，消除 Update 中的高频 FindWithTag
         var playerObj = GameObject.FindWithTag("Player");
         if (playerObj != null)
         {
@@ -81,68 +80,31 @@ public class EnemyController : MonoBehaviour, IDamageable
         UpdateUI();
     }
 
-    private void Update()
-    {
-        if (isDead || isVulnerable) return;
-
-        // 环境共鸣计时器与叠层
-        resonanceTimer -= Time.deltaTime;
-        if (resonanceTimer <= 0f)
-        {
-            resonanceTimer = resonanceInterval;
-            if (resonanceStacks < maxResonanceStacks)
-            {
-                resonanceStacks++;
-                Debug.Log($"【环境共鸣】层数累加: {resonanceStacks}/{maxResonanceStacks} (+{resonanceStacks * resonanceDamageBonus * 100}% 增伤)");
-
-                if (resonanceStacks >= maxResonanceStacks)
-                {
-                    TriggerResonanceAOE();
-                }
-            }
-        }
-    }
-
-    // 独立的破韧视觉变色控制
+    // 修复 New 5.1：使用 MaterialPropertyBlock 改色
     public void SetVulnerableVisual(bool enable)
     {
-        if (enemyRenderer != null)
-        {
-            enemyRenderer.material.color = enable ? new Color(0.6f, 0.6f, 0.6f, 1f) : originalColor;
-        }
+        if (enemyRenderer == null) return;
+        enemyRenderer.GetPropertyBlock(mpb);
+        Color targetColor = enable ? new Color(0.6f, 0.2f, 0.2f, 1f) : originalColor;
+        mpb.SetColor(BaseMapColorId, targetColor);
+        mpb.SetColor(LegacyColorId, targetColor);
+        enemyRenderer.SetPropertyBlock(mpb);
     }
 
-    // 满层 8m AOE 爆发
-    public void TriggerResonanceAOE()
-    {
-        Debug.LogWarning("【环境共鸣爆发】共鸣满层！释放 8m AOE 爆发伤害！");
-        if (playerTransform != null)
-        {
-            float dist = Vector3.Distance(transform.position, playerTransform.position);
-            if (dist <= aoeRadius)
-            {
-                var damageable = playerTransform.GetComponent<IDamageable>();
-                if (damageable != null)
-                {
-                    damageable.TakeDamage(30f);
-                }
-            }
-        }
-        resonanceStacks = 0;
-    }
-
-    // 计算共鸣增伤后的最终攻击力
+    // 委托给 EnvironmentalResonance 计算增伤
     public float GetCalculatedAttackDamage(float baseDamage)
     {
-        return baseDamage * (1f + resonanceStacks * resonanceDamageBonus);
+        if (EnvironmentalResonance.Instance != null)
+        {
+            return baseDamage * EnvironmentalResonance.Instance.GetDamageBonusMultiplier();
+        }
+        return baseDamage;
     }
 
-    // IDamageable 接口实现（多态受击）
-    public void TakeDamage(float damage, float toughnessDamage)
+    public void TakeDamage(float damage, float toughnessDamage = 0f)
     {
         if (isDead) return;
 
-        // IDamageModifier 接口解耦伤害倍率计算
         if (stateMachine != null && stateMachine.CurrentState is IDamageModifier modifier)
         {
             damage = modifier.ModifyDamage(damage);
@@ -168,12 +130,13 @@ public class EnemyController : MonoBehaviour, IDamageable
         }
     }
 
-    // 破韧逻辑：打断并清零共鸣
+    // 破韧逻辑：通知环境共鸣系统处理层数变化
     public void TriggerBreak()
     {
-        resonanceStacks = 0;
-        resonanceTimer = resonanceInterval;
-        Debug.Log("【破韧机制】怪物破韧！共鸣层数已清零重置！");
+        if (EnvironmentalResonance.Instance != null)
+        {
+            EnvironmentalResonance.Instance.OnEnemyBrokenOrKilled(rank, false);
+        }
 
         if (stateMachine != null && vulnerableState != null)
         {
@@ -212,24 +175,25 @@ public class EnemyController : MonoBehaviour, IDamageable
     public void Die()
     {
         if (isDead) return;
+        isDead = true;
+
+        if (EnvironmentalResonance.Instance != null)
+        {
+            EnvironmentalResonance.Instance.OnEnemyBrokenOrKilled(rank, true);
+        }
+
         if (stateMachine != null && deadState != null)
         {
             stateMachine.ChangeState(deadState);
         }
         else
         {
-            isDead = true;
             Destroy(gameObject, 0.2f);
         }
     }
 
     private void OnDrawGizmosSelected()
     {
-        // 红色线框：8m 共鸣 AOE 范围
-        Gizmos.color = new Color(1f, 0f, 0f, 0.35f);
-        Gizmos.DrawWireSphere(transform.position, aoeRadius);
-
-        // 黄色线框：近战攻击判定范围
         Gizmos.color = Color.yellow;
         Gizmos.DrawWireSphere(transform.position, 2.0f);
     }

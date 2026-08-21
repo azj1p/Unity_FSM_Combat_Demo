@@ -1,12 +1,22 @@
+using System;
 using UnityEngine;
 
 public class StateMachine : MonoBehaviour
 {
-    [Header("State Machine")]
-    [SerializeField] private State initialState;
-
-    // 公开当前状态属性，供外部（如 Controller、接口修饰器）安全读取
+    public State initialState;
     public State CurrentState { get; private set; }
+
+    // 事件系统：解耦状态转换监听（Suggestion #2）
+    public event Action<State, State> OnStateChanged; // (原状态, 新状态)
+
+    private MonoBehaviour runner;
+
+    private void Awake()
+    {
+        runner = GetComponent<EnemyController>() as MonoBehaviour
+              ?? GetComponent<PlayerController>() as MonoBehaviour
+              ?? this;
+    }
 
     private void Start()
     {
@@ -20,8 +30,8 @@ public class StateMachine : MonoBehaviour
     {
         if (CurrentState != null)
         {
-            CurrentState.LogicUpdate(this);
-            CurrentState.TransitionChecks(this);
+            CurrentState.ExecuteLogicUpdate(runner);
+            CurrentState.ExecuteTransitionChecks(runner);
         }
     }
 
@@ -29,22 +39,25 @@ public class StateMachine : MonoBehaviour
     {
         if (CurrentState != null)
         {
-            CurrentState.PhysicsUpdate(this);
+            CurrentState.ExecutePhysicsUpdate(runner);
         }
     }
 
     public void ChangeState(State newState)
     {
+        if (newState == null || newState == CurrentState) return;
+
+        State previousState = CurrentState;
+
         if (CurrentState != null)
         {
-            CurrentState.OnExit(this);
+            CurrentState.ExecuteExit(runner);
         }
 
         CurrentState = newState;
+        CurrentState.ExecuteEnter(runner);
 
-        if (CurrentState != null)
-        {
-            CurrentState.OnEnter(this);
-        }
+        // 广播状态转换事件
+        OnStateChanged?.Invoke(previousState, newState);
     }
 }

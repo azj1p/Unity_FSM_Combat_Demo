@@ -1,46 +1,36 @@
 using UnityEngine;
 
 [CreateAssetMenu(fileName = "EnemyDeadState", menuName = "FSM/Enemy/DeadState")]
-public class EnemyDeadState : State
+public class EnemyDeadState : State<EnemyController>
 {
     [Header("Death Settings")]
-    [Tooltip("死亡后销毁物体的延迟时间（秒）")]
     public float destroyDelay = 1.5f;
 
-    public override void OnEnter(StateMachine stateMachine)
+    public override void OnEnter(EnemyController enemy)
     {
-        var controller = stateMachine.GetComponent<EnemyController>();
-        if (controller != null)
+        if (enemy == null) return;
+        enemy.isDead = true;
+        enemy.HideUI();
+
+        if (enemy.rb != null)
         {
-            controller.isDead = true;
-            controller.HideUI(); // 死亡瞬间立即隐藏头顶血条和韧性条
+            enemy.rb.linearVelocity = Vector3.zero;
+            enemy.rb.isKinematic = true;
         }
 
-        // 冻结刚体物理
-        var rb = stateMachine.GetComponent<Rigidbody>();
-        if (rb != null)
-        {
-            rb.linearVelocity = Vector3.zero;
-            rb.isKinematic = true;
-        }
-
-        // 禁用碰撞体
-        var col = stateMachine.GetComponent<Collider>();
+        var col = enemy.GetComponent<Collider>();
         if (col != null)
         {
             col.enabled = false;
         }
 
-        // 触发死亡动画
-        var animator = stateMachine.GetComponent<Animator>();
+        var animator = enemy.GetComponent<Animator>();
         if (animator != null)
         {
             animator.SetTrigger("Die");
         }
 
         Debug.Log("【FSM驱动】敌人死亡，隐藏UI并等待销毁！");
-        Destroy(stateMachine.gameObject, destroyDelay);
+        Destroy(enemy.gameObject, destroyDelay);
     }
-
-
 }
