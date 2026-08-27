@@ -1,31 +1,16 @@
 using UnityEngine;
-using UnityEngine.UI;
 
+[RequireComponent(typeof(EnemyStats))]
+[RequireComponent(typeof(EnemyVisual))]
+[RequireComponent(typeof(EnemyCombat))]
+[RequireComponent(typeof(EnemyUI))]
 public class EnemyController : MonoBehaviour, IDamageable
 {
-    [Header("Enemy Classification (敌人分类)")]
-    [Tooltip("Normal(小怪:破韧/击杀-1层) | Elite(精英:重置为0) | Boss(首领:重置为0+推条25%)")]
-    public EnemyRank rank = EnemyRank.Normal;
-
-    [Header("Stats Asset (数据驱动)")]
-    public CharacterStatsSO statsAsset;
-
-    [Header("Runtime Attributes")]
-    public float maxHealth = 100f;
-    public float currentHealth;
-    public float maxToughness = 100f;
-    public float currentToughness;
-
-    [HideInInspector] public bool isVulnerable;
-    [HideInInspector] public float vulnerableTimer;
-    [HideInInspector] public float attackTimer;
-
-    // 单一事实源：共鸣层数统一通过单例读取，消除冗余字段
-    public int resonanceStacks => EnvironmentalResonance.Instance != null ? EnvironmentalResonance.Instance.resonanceStacks : 0;
-
-    [Header("UI")]
-    public Slider healthBar;
-    public Slider toughnessBar;
+    [Header("子系统组件引用")]
+    [HideInInspector] public EnemyStats stats;
+    [HideInInspector] public EnemyVisual visual;
+    [HideInInspector] public EnemyCombat combat;
+    [HideInInspector] public EnemyUI enemyUI;
 
     [Header("States")]
     public State idleState;
@@ -37,68 +22,70 @@ public class EnemyController : MonoBehaviour, IDamageable
 
     [HideInInspector] public StateMachine stateMachine;
     [HideInInspector] public Rigidbody rb;
-    [HideInInspector] public bool isDead;
-    [HideInInspector] public Transform playerTransform;
+    [HideInInspector] public float vulnerableTimer;
+    [HideInInspector] public float attackTimer;
 
-    // 工业级材质改色：MaterialPropertyBlock 零内存分配、不破坏合批
-    private Renderer enemyRenderer;
-    private MaterialPropertyBlock mpb;
-    private Color originalColor = Color.white;
-    private static readonly int BaseMapColorId = Shader.PropertyToID("_BaseColor");
-    private static readonly int LegacyColorId = Shader.PropertyToID("_Color");
+    // 单一事实源与状态标记
+    public bool isVulnerable => stateMachine != null && stateMachine.CurrentState == vulnerableState;
+    public bool IsVulnerable => isVulnerable;
+    [HideInInspector] public bool isDead;
+
+    // Facade 门面映射：保证所有现有状态类读写不受任何影响
+    public Transform playerTransform => combat != null ? combat.playerTransform : null;
+    public EnemyRank rank => stats != null ? stats.rank : EnemyRank.Normal;
+    public float currentHealth => stats != null ? stats.currentHealth : 0f;
+    public float maxHealth => stats != null ? stats.maxHealth : 100f;
+    public float currentToughness => stats != null ? stats.currentToughness : 0f;
+    public float maxToughness => stats != null ? stats.maxToughness : 100f;
+    public int resonanceStacks => EnvironmentalResonance.Instance != null ? EnvironmentalResonance.Instance.resonanceStacks : 0;
 
     private void Awake()
     {
         stateMachine = GetComponent<StateMachine>();
         rb = GetComponent<Rigidbody>();
-        enemyRenderer = GetComponent<Renderer>();
-        mpb = new MaterialPropertyBlock();
+        stats = GetComponent<EnemyStats>();
+        visual = GetComponent<EnemyVisual>();
+        combat = GetComponent<EnemyCombat>();
+        enemyUI = GetComponent<EnemyUI>();
 
-        if (enemyRenderer != null && enemyRenderer.sharedMaterial != null)
+        // P1-3: 校验 Boss 配置
+        if (stats != null && stats.rank == EnemyRank.Normal && gameObject.name.ToLower().Contains("boss"))
         {
-            originalColor = enemyRenderer.sharedMaterial.color;
+            Debug.LogWarning($"【EnemyController】[{gameObject.name}] 名称包含 Boss 但当前等级仍为 Normal，请检查 Inspector 配置！");
         }
 
-        if (statsAsset != null)
+        // 订阅数据事件联动
+        if (stats != null)
         {
-            maxHealth = statsAsset.maxHealth;
-            maxToughness = statsAsset.maxToughness;
+            stats.OnStatsChanged += HandleStatsChanged;
+            stats.OnPoiseBroken += HandlePoiseBroken;
+            stats.OnDeath += HandleDeath;
         }
-
-        currentHealth = maxHealth;
-        currentToughness = maxToughness;
     }
 
-    private void Start()
+    private void OnDestroy()
     {
-        var playerObj = GameObject.FindWithTag("Player");
-        if (playerObj != null)
+        if (stats != null)
         {
-            playerTransform = playerObj.transform;
+            stats.OnStatsChanged -= HandleStatsChanged;
+            stats.OnPoiseBroken -= HandlePoiseBroken;
+            stats.OnDeath -= HandleDeath;
         }
-
-        UpdateUI();
     }
 
-    // 修复 New 5.1：使用 MaterialPropertyBlock 改色
-    public void SetVulnerableVisual(bool enable)
+    private void HandleStatsChanged(float hp, float maxHp, float tough, float maxTough)
     {
-        if (enemyRenderer == null) return;
-        enemyRenderer.GetPropertyBlock(mpb);
-        Color targetColor = enable ? new Color(0.6f, 0.2f, 0.2f, 1f) : originalColor;
-        mpb.SetColor(BaseMapColorId, targetColor);
-        mpb.SetColor(LegacyColorId, targetColor);
-        enemyRenderer.SetPropertyBlock(mpb);
+        if (enemyUI != null) enemyUI.UpdateBars(hp, maxHp, tough, maxTough);
     }
 
-    // 委托给 EnvironmentalResonance 计算增伤
-    public float GetCalculatedAttackDamage(float baseDamage)
+    private void HandlePoiseBroken()
     {
-        if (EnvironmentalResonance.Instance != null)
-        {
-            return baseDamage * EnvironmentalResonance.Instance.GetDamageBonusMultiplier();
-        }
-        return baseDamage;
+        if (!IsVulnerable) TriggerBreak();
+    }
+
+    private void HandleDeath()
+    {
+        Die();
     }
 
     public void TakeDamage(float damage, float toughnessDamage = 0f)
@@ -110,32 +97,17 @@ public class EnemyController : MonoBehaviour, IDamageable
             damage = modifier.ModifyDamage(damage);
         }
 
-        currentHealth -= damage;
-        currentToughness -= toughnessDamage;
-        currentHealth = Mathf.Clamp(currentHealth, 0, maxHealth);
-        currentToughness = Mathf.Clamp(currentToughness, 0, maxToughness);
-        UpdateUI();
-
-        Debug.Log($"怪物受击！生命: {currentHealth}/{maxHealth} | 韧性: {currentToughness}/{maxToughness}");
-
-        if (currentHealth <= 0)
+        if (stats != null)
         {
-            Die();
-            return;
-        }
-
-        if (!isVulnerable && currentToughness <= 0)
-        {
-            TriggerBreak();
+            stats.ApplyDamage(damage, toughnessDamage);
         }
     }
 
-    // 破韧逻辑：通知环境共鸣系统处理层数变化
     public void TriggerBreak()
     {
-        if (EnvironmentalResonance.Instance != null)
+        if (EnvironmentalResonance.Instance != null && stats != null)
         {
-            EnvironmentalResonance.Instance.OnEnemyBrokenOrKilled(rank, false);
+            EnvironmentalResonance.Instance.OnEnemyBrokenOrKilled(stats.rank, false);
         }
 
         if (stateMachine != null && vulnerableState != null)
@@ -146,30 +118,28 @@ public class EnemyController : MonoBehaviour, IDamageable
 
     public void ResetToughness()
     {
-        if (isDead) return;
-        currentToughness = maxToughness;
-        UpdateUI();
-        Debug.Log("【韧性重置】怪物韧性条回满！");
+        if (stats != null) stats.ResetToughness();
+    }
+
+    public void SetVulnerableVisual(bool enable)
+    {
+        if (visual != null) visual.SetVulnerableVisual(enable);
+    }
+
+    public float GetCalculatedAttackDamage(float baseDamage)
+    {
+        if (combat != null) return combat.CalculateOutgoingDamage(baseDamage);
+        return baseDamage;
     }
 
     public void HideUI()
     {
-        if (healthBar != null) healthBar.gameObject.SetActive(false);
-        if (toughnessBar != null) toughnessBar.gameObject.SetActive(false);
+        if (enemyUI != null) enemyUI.HideUI();
     }
 
     public void UpdateUI()
     {
-        if (healthBar != null)
-        {
-            healthBar.maxValue = maxHealth;
-            healthBar.value = currentHealth;
-        }
-        if (toughnessBar != null)
-        {
-            toughnessBar.maxValue = maxToughness;
-            toughnessBar.value = currentToughness;
-        }
+        if (stats != null) stats.NotifyStatsChanged();
     }
 
     public void Die()
@@ -177,9 +147,9 @@ public class EnemyController : MonoBehaviour, IDamageable
         if (isDead) return;
         isDead = true;
 
-        if (EnvironmentalResonance.Instance != null)
+        if (EnvironmentalResonance.Instance != null && stats != null)
         {
-            EnvironmentalResonance.Instance.OnEnemyBrokenOrKilled(rank, true);
+            EnvironmentalResonance.Instance.OnEnemyBrokenOrKilled(stats.rank, true);
         }
 
         if (stateMachine != null && deadState != null)

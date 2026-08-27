@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.UI;
+using TMPro; // 1. 添加此命名空间引用
 
 public class PlayerController : MonoBehaviour, IDamageable
 {
@@ -14,11 +15,12 @@ public class PlayerController : MonoBehaviour, IDamageable
 
     public float moveSpeed = 5.0f;
     public float jumpForce = 5.0f;
-    public float attackDamage = 20.0f;
-    public float toughnessDamage = 25.0f;
+    public float attackDamage = 10.0f;
+    public float toughnessDamage = 35.0f;
 
     [Header("UI")]
     public Slider healthBar;
+    public TMP_Text healthText; // 2. 将 Text 改为 TMP_Text
 
     [Header("States")]
     public State idleState;
@@ -58,7 +60,6 @@ public class PlayerController : MonoBehaviour, IDamageable
         UpdateUI();
     }
 
-    // 接口实现：支持范围 AOE / 敌人攻击多态判定
     public void TakeDamage(float damage, float toughnessDamage = 0f)
     {
         if (isDead) return;
@@ -80,6 +81,7 @@ public class PlayerController : MonoBehaviour, IDamageable
     public void HideUI()
     {
         if (healthBar != null) healthBar.gameObject.SetActive(false);
+        if (healthText != null) healthText.gameObject.SetActive(false);
     }
 
     public void UpdateUI()
@@ -88,6 +90,11 @@ public class PlayerController : MonoBehaviour, IDamageable
         {
             healthBar.maxValue = maxHealth;
             healthBar.value = currentHealth;
+        }
+
+        if (healthText != null)
+        {
+            healthText.text = $"{Mathf.CeilToInt(currentHealth)} / {Mathf.CeilToInt(maxHealth)}";
         }
     }
 

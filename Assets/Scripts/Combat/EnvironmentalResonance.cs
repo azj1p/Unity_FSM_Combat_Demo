@@ -39,6 +39,12 @@ public class EnvironmentalResonance : MonoBehaviour
     [HideInInspector] public bool isWarningAOE = false;
     [HideInInspector] public float warningTimer = 0f;
 
+    // 外部只读属性
+    public int Stacks => resonanceStacks;
+    public int MaxStacks => maxResonanceStacks;
+    public float CurrentTimer => currentTimer;
+    public float Interval => resonanceInterval;
+
     // 事件系统：用于驱动 UI 刷新与视觉反馈（解耦 UI 与核心逻辑）
     public event Action<int, int> OnResonanceStacksChanged; // (当前层数, 最大层数)
     public event Action<float, float> OnTimerUpdated;       // (当前剩余时间, 总时间)
@@ -67,7 +73,7 @@ public class EnvironmentalResonance : MonoBehaviour
         // 预警状态下的独立倒计时
         if (isWarningAOE)
         {
-            warningTimer -= Time.deltaTime;
+            warningTimer -= Time.deltaTime * globalSpeedMultiplier;
             OnAOEWarningState?.Invoke(true, warningTimer);
 
             if (warningTimer <= 0f)
@@ -179,10 +185,21 @@ public class EnvironmentalResonance : MonoBehaviour
         {
             isWarningAOE = false;
             OnAOEWarningState?.Invoke(false, 0f);
+            currentTimer = resonanceInterval;
             Debug.Log("【环境反制】在预警期间成功反制，AOE 爆发被打断！");
         }
 
         OnResonanceStacksChanged?.Invoke(resonanceStacks, maxResonanceStacks);
+        OnTimerUpdated?.Invoke(currentTimer, resonanceInterval);
+    }
+
+    /// <summary>
+    /// P1-4 优化：供外部系统（如 Boss 狂暴、全局减速等）动态调节共鸣计时流速
+    /// </summary>
+    public void SetGlobalSpeedMultiplier(float multiplier)
+    {
+        globalSpeedMultiplier = Mathf.Max(0.1f, multiplier);
+        OnTimerUpdated?.Invoke(currentTimer, resonanceInterval);
     }
 
     // 提供给外部的统一增伤倍率查询接口

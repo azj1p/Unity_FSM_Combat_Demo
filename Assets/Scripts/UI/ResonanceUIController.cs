@@ -3,160 +3,141 @@ using UnityEngine.UI;
 
 public class ResonanceUIController : MonoBehaviour
 {
-    [Header("Core Countdown & Action Value UI (核心行动条/倒计时)")]
-    public Slider threatSlider;
-    public Text countdownText;
+    [Header("UI 引用")]
+    [SerializeField] private Slider threatSlider;         // 威胁进度条
+    [SerializeField] private Text countdownText;          // 倒计时数字
+    [SerializeField] private Text stackText;              // 层数文本
+    [SerializeField] private Text buffText;               // 增益文本
+    [SerializeField] private Image warningOverlay;        // 全屏预警遮罩
+    [SerializeField] private GameObject worldAOEIndicator; // 世界空间 AOE 范围
 
-    [Header("Resonance Stacks UI (共鸣层数指示)")]
-    public Text stackText;
-    public Text buffText;
+    [Header("引导系统")]
+    [SerializeField] private Text guidanceText;           // 玩家引导文字
+    [SerializeField] private float guidanceDisplayDuration = 2f;
 
-    [Header("AOE Warning & Screen Feedback (预警与屏幕反馈)")]
-    public Image warningOverlay;
-    public GameObject worldAOEIndicator;
-
-    [Header("Player Guidance Prompts (玩家引导反馈)")]
-    public Text guidanceText;
-    public float guidanceDisplayDuration = 2.0f;
     private float guidanceTimer;
-
-    // 记录上一次层数（-1 代表尚未初始化，避免开局误弹提示）
-    private int lastStacks = -1;
+    private int lastStacks;
+    private bool isAOEWarningActive;                      // 标记当前是否处于预警状态
 
     private void OnEnable()
     {
-        if (EnvironmentalResonance.Instance != null)
-        {
-            BindEvents();
-        }
+        // 仅在 OnEnable 中统一绑定事件
+        BindEvents();
     }
 
     private void Start()
     {
-        BindEvents();
+        // Start 中不再调用 BindEvents，仅主动拉取一次单例当前数据做初始刷新
+        var inst = EnvironmentalResonance.Instance;
+        if (inst != null)
+        {
+            HandleStacksChanged(inst.resonanceStacks, inst.maxResonanceStacks);
+            HandleTimerUpdated(inst.currentTimer, inst.resonanceInterval);
+        }
     }
 
     private void OnDisable()
     {
-        if (EnvironmentalResonance.Instance != null)
-        {
-            EnvironmentalResonance.Instance.OnResonanceStacksChanged -= HandleStacksChanged;
-            EnvironmentalResonance.Instance.OnTimerUpdated -= HandleTimerUpdated;
-            EnvironmentalResonance.Instance.OnAOEWarningState -= HandleAOEWarningState;
-            EnvironmentalResonance.Instance.OnAOETriggered -= HandleAOETriggered;
-        }
+        if (EnvironmentalResonance.Instance == null) return;
+        EnvironmentalResonance.Instance.OnResonanceStacksChanged -= HandleStacksChanged;
+        EnvironmentalResonance.Instance.OnTimerUpdated -= HandleTimerUpdated;
+        EnvironmentalResonance.Instance.OnAOEWarningState -= HandleAOEWarningState;
+        EnvironmentalResonance.Instance.OnAOETriggered -= HandleAOETriggered;
     }
 
     private void BindEvents()
     {
-        var res = EnvironmentalResonance.Instance;
-        if (res == null) return;
+        var inst = EnvironmentalResonance.Instance;
+        if (inst == null) return;
 
-        res.OnResonanceStacksChanged -= HandleStacksChanged;
-        res.OnResonanceStacksChanged += HandleStacksChanged;
+        // 防御性解绑：先减后加，彻底避免重复注册
+        inst.OnResonanceStacksChanged -= HandleStacksChanged;
+        inst.OnTimerUpdated -= HandleTimerUpdated;
+        inst.OnAOEWarningState -= HandleAOEWarningState;
+        inst.OnAOETriggered -= HandleAOETriggered;
 
-        res.OnTimerUpdated -= HandleTimerUpdated;
-        res.OnTimerUpdated += HandleTimerUpdated;
-
-        res.OnAOEWarningState -= HandleAOEWarningState;
-        res.OnAOEWarningState += HandleAOEWarningState;
-
-        res.OnAOETriggered -= HandleAOETriggered;
-        res.OnAOETriggered += HandleAOETriggered;
-
-        // 初始化显示
-        HandleStacksChanged(res.resonanceStacks, res.maxResonanceStacks);
-        HandleTimerUpdated(res.currentTimer, res.resonanceInterval);
+        inst.OnResonanceStacksChanged += HandleStacksChanged;
+        inst.OnTimerUpdated += HandleTimerUpdated;
+        inst.OnAOEWarningState += HandleAOEWarningState;
+        inst.OnAOETriggered += HandleAOETriggered;
     }
 
     private void Update()
     {
-        if (guidanceTimer > 0f)
+        // 引导提示文字倒计时隐藏
+        if (guidanceTimer >= 0)
         {
             guidanceTimer -= Time.deltaTime;
-            if (guidanceTimer <= 0f && guidanceText != null)
+            if (guidanceTimer <= 0 && guidanceText != null)
             {
                 guidanceText.gameObject.SetActive(false);
             }
         }
+
+        // P0-2 修复：将 PingPong 动画放到 Update 中持续执行
+        if (isAOEWarningActive)
+        {
+            float alpha = Mathf.PingPong(Time.time * 4f, 0.3f) + 0.2f;
+            if (warningOverlay != null)
+            {
+                warningOverlay.color = new Color(1f, 0f, 0f, alpha);
+            }
+        }
     }
 
-    private void HandleTimerUpdated(float currentTimer, float maxInterval)
+    private void HandleTimerUpdated(float current, float max)
     {
-        if (threatSlider != null)
-        {
-            threatSlider.maxValue = maxInterval;
-            threatSlider.value = maxInterval - currentTimer;
-        }
-
         if (countdownText != null)
         {
-            countdownText.text = $"{currentTimer:00.0}s";
+            countdownText.text = $"{current:00.0}s";
+        }
+
+        if (threatSlider != null)
+        {
+            threatSlider.maxValue = max;
+            threatSlider.value = max - current;
         }
     }
 
-    private void HandleStacksChanged(int currentStacks, int maxStacks)
+    private void HandleStacksChanged(int current, int max)
     {
         if (stackText != null)
         {
-            stackText.text = $"共鸣层数: {currentStacks} / {maxStacks}";
+            stackText.text = $"共鸣层数: {current} / {max}";
         }
 
         if (buffText != null)
         {
-            buffText.text = $"全场敌方伤害: +{currentStacks * 8}%";
+            buffText.text = $"全场敌方伤害: +{current * 2}%";
         }
 
-        // 首次初始化：只同步数据，不显示引导文字
-        if (lastStacks == -1)
-        {
-            lastStacks = currentStacks;
-            if (guidanceText != null) guidanceText.gameObject.SetActive(false);
-            return;
-        }
-
-        // 只有层数真正被玩家削减时，才弹出反制成功提示
-        if (currentStacks < lastStacks)
+        // 玩家引导颜色分级
+        if (current < lastStacks)
         {
             ShowGuidance("【环境反制】共鸣已成功重置/削减！", Color.green);
         }
-        // 临界满层引导警报（层数达到 2 层时）
-        else if (currentStacks >= maxStacks - 1 && currentStacks < maxStacks)
+        else if (current >= max - 1 && current < max)
         {
             ShowGuidance("【警告】环境共鸣濒临满层！请迅速攻击敌人进行破韧！", Color.yellow);
         }
 
-        lastStacks = currentStacks;
+        lastStacks = current;
     }
 
-    private void HandleAOEWarningState(bool isWarning, float remainingTime)
+    private void HandleAOEWarningState(bool isWarning, float duration)
     {
+        isAOEWarningActive = isWarning;
+
         if (isWarning)
         {
-            ShowGuidance($"【危险】共鸣满层爆发倒计时: {remainingTime:F1}s！立即撤离范围！", Color.red);
-
-            if (worldAOEIndicator != null)
-            {
-                worldAOEIndicator.SetActive(true);
-            }
-
-            if (warningOverlay != null)
-            {
-                warningOverlay.gameObject.SetActive(true);
-                float alpha = Mathf.PingPong(Time.time * 4f, 0.45f) + 0.1f;
-                warningOverlay.color = new Color(1f, 0f, 0f, alpha);
-            }
+            ShowGuidance($"【危险】共鸣满层爆发倒计时: {duration:F1}s！立即撤离范围！", Color.red);
+            if (warningOverlay != null) warningOverlay.gameObject.SetActive(true);
+            if (worldAOEIndicator != null) worldAOEIndicator.SetActive(true);
         }
         else
         {
-            if (worldAOEIndicator != null)
-            {
-                worldAOEIndicator.SetActive(false);
-            }
-            if (warningOverlay != null)
-            {
-                warningOverlay.gameObject.SetActive(false);
-            }
+            if (warningOverlay != null) warningOverlay.gameObject.SetActive(false);
+            if (worldAOEIndicator != null) worldAOEIndicator.SetActive(false);
         }
     }
 
