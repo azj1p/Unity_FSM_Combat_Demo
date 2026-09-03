@@ -28,7 +28,8 @@ public class WorldAOEIndicator : MonoBehaviour
 
     private void Start()
     {
-        BindEvents();
+        // 仅保留初始位置与尺寸同步，避免与 OnEnable 重复调用 BindEvents 导致双重订阅
+        SyncTransformAndRadius();
     }
 
     private void OnEnable()

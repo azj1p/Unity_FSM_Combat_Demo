@@ -41,7 +41,7 @@ public class PlayerDeadState : State<PlayerController>
             {
                 isPaused = true;
                 Time.timeScale = 0f;
-                Debug.LogWarning("【GAME OVER】游戏已暂停！按下 [R] 键重新开始关卡。");
+                Debug.Log("【GAME OVER】游戏已暂停！按下 [R] 键重新开始关卡。");
             }
         }
         else

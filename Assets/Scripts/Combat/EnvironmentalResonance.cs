@@ -121,7 +121,7 @@ public class EnvironmentalResonance : MonoBehaviour
     {
         isWarningAOE = true;
         warningTimer = aoeWarningDuration;
-        Debug.LogWarning($"【环境威胁】共鸣满层！进入 {aoeWarningDuration} 秒 AOE 爆发预警！");
+        Debug.Log($"【环境威胁】共鸣满层！进入 {aoeWarningDuration} 秒 AOE 爆发预警！");
         OnAOEWarningState?.Invoke(true, warningTimer);
     }
 
@@ -132,7 +132,8 @@ public class EnvironmentalResonance : MonoBehaviour
         OnAOEWarningState?.Invoke(false, 0f);
         OnAOETriggered?.Invoke();
 
-        Debug.LogError("【环境共鸣爆发】AOE 爆发释放！");
+        //Debug.LogError("【环境共鸣爆发】AOE 爆发释放！");
+        Debug.Log("<color=red>【环境共鸣爆发】AOE 爆发释放！</color>");
 
         // 统一在环境层遍历伤害（仅对玩家阵营结算）
         Collider[] hits = Physics.OverlapSphere(transform.position, aoeRadius);
@@ -145,6 +146,20 @@ public class EnvironmentalResonance : MonoBehaviour
                 if (damageable != null)
                 {
                     damageable.TakeDamage(aoeDamage, 0f);
+
+                    // 在 EnvironmentalResonance.cs 的 ExecuteAOEExplosion 内部：
+                    var playerCtrl = hit.GetComponent<PlayerController>();
+                    if (playerCtrl != null)
+                    {
+                        playerCtrl.ApplyStagger(0.6f); // 受到 AOE 冲击硬直 0.6 秒，实现行动延后反馈
+
+                        // 核心调用链闭环：显式扣除玩家 10% 行动值
+                        if (ActionValueSystem.Instance != null)
+                        {
+                            ActionValueSystem.Instance.DelayAction(playerCtrl, 0.1f);
+                        }
+                    }
+
                     Debug.Log($"【环境共鸣爆发】成功命中玩家！造成 {aoeDamage} 点环境伤害。");
                 }
             }
@@ -196,6 +211,7 @@ public class EnvironmentalResonance : MonoBehaviour
     /// <summary>
     /// P1-4 优化：供外部系统（如 Boss 狂暴、全局减速等）动态调节共鸣计时流速
     /// </summary>
+    public float GlobalSpeedMultiplier => globalSpeedMultiplier;
     public void SetGlobalSpeedMultiplier(float multiplier)
     {
         globalSpeedMultiplier = Mathf.Max(0.1f, multiplier);

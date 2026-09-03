@@ -583,8 +583,6 @@ MonoBehaviour:
   statsAsset: {fileID: 0}
   maxHealth: 300
   currentHealth: 0
-  maxToughness: 100
-  currentToughness: 0
   moveSpeed: 5
   jumpForce: 5
   attackDamage: 10
@@ -598,6 +596,7 @@ MonoBehaviour:
   stateMachine: {fileID: 0}
   rb: {fileID: 0}
   isDead: 0
+  isStaggered: 0
 --- !u!54 &364236766
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -653,6 +652,14 @@ MonoBehaviour:
   isAutoEnabled: 0
   attackRange: 2.2
   attackCooldown: 0.8
+  evadeBufferDistance: 1.5
+  evadeMoveDistance: 5
+  toggleCooldown: 0.25
+  retargetInterval: 0.3
+  distanceWeight: 0.9
+  toughnessWeight: 0.4
+  healthWeight: 0.3
+  showDebugLog: 0
 --- !u!1 &457602377
 GameObject:
   m_ObjectHideFlags: 0
@@ -1011,6 +1018,7 @@ GameObject:
   m_Component:
   - component: {fileID: 726780321}
   - component: {fileID: 726780320}
+  - component: {fileID: 726780322}
   m_Layer: 0
   m_Name: EnvironmentManager
   m_TagString: Untagged
@@ -1056,6 +1064,20 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &726780322
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 726780319}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 24c345878949899438880ec801bff603, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::ActionValueSystem
+  baseActionValue: 100
+  intervalSeconds: 5
 --- !u!1 &742645670
 GameObject:
   m_ObjectHideFlags: 0

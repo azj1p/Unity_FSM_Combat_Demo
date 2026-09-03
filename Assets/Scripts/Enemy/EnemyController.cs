@@ -4,7 +4,7 @@ using UnityEngine;
 [RequireComponent(typeof(EnemyVisual))]
 [RequireComponent(typeof(EnemyCombat))]
 [RequireComponent(typeof(EnemyUI))]
-public class EnemyController : MonoBehaviour, IDamageable
+public class EnemyController : MonoBehaviour, IDamageable, IActionValueEntity
 {
     [Header("子系统组件引用")]
     [HideInInspector] public EnemyStats stats;
@@ -19,6 +19,9 @@ public class EnemyController : MonoBehaviour, IDamageable
     public State attackState;
     public State vulnerableState;
     public State deadState;
+
+    [Header("行动值系统配置 (P3-2)")]
+    [SerializeField] private float actionSpeed = 20f; // 基准行动速度 (100 / 20 = 5.0 秒一个周期)
 
     [HideInInspector] public StateMachine stateMachine;
     [HideInInspector] public Rigidbody rb;
@@ -38,6 +41,31 @@ public class EnemyController : MonoBehaviour, IDamageable
     public float currentToughness => stats != null ? stats.currentToughness : 0f;
     public float maxToughness => stats != null ? stats.maxToughness : 100f;
     public int resonanceStacks => EnvironmentalResonance.Instance != null ? EnvironmentalResonance.Instance.resonanceStacks : 0;
+
+    // --- IActionValueEntity 接口实现 ---
+    public float ActionSpeed => actionSpeed;
+
+    /// <summary>
+    /// 行动值蓄满（达到 100）就绪时的出招驱动
+    /// </summary>
+    public void ExecuteAction()
+    {
+        if (isDead || IsVulnerable) return;
+
+        // 行动值蓄满时的动作制转译：若玩家在攻击射程内且不在硬直中，驱动进入攻击状态
+        if (playerTransform != null)
+        {
+            float dist = Vector3.Distance(transform.position, playerTransform.position);
+            if (dist <= 2.5f && stateMachine != null && attackState != null)
+            {
+                if (stateMachine.CurrentState != attackState)
+                {
+                    stateMachine.ChangeState(attackState);
+                }
+            }
+        }
+    }
+    // ----------------------------------
 
     private void Awake()
     {
@@ -63,8 +91,40 @@ public class EnemyController : MonoBehaviour, IDamageable
         }
     }
 
+    private void OnEnable()
+    {
+        // 注册到行动值时间轴系统
+        if (ActionValueSystem.Instance != null)
+        {
+            ActionValueSystem.Instance.RegisterEntity(this);
+        }
+    }
+
+    private void OnDisable()
+    {
+        // 离开场景或失活时安全注销
+        if (ActionValueSystem.Instance != null)
+        {
+            ActionValueSystem.Instance.UnregisterEntity(this);
+        }
+    }
+
+    private void Start()
+    {
+        // 弥补场景加载首帧单例初始化时序可能带来的漏注
+        if (ActionValueSystem.Instance != null)
+        {
+            ActionValueSystem.Instance.RegisterEntity(this);
+        }
+    }
+
     private void OnDestroy()
     {
+        if (ActionValueSystem.Instance != null)
+        {
+            ActionValueSystem.Instance.UnregisterEntity(this);
+        }
+
         if (stats != null)
         {
             stats.OnStatsChanged -= HandleStatsChanged;
@@ -110,6 +170,12 @@ public class EnemyController : MonoBehaviour, IDamageable
             EnvironmentalResonance.Instance.OnEnemyBrokenOrKilled(stats.rank, false);
         }
 
+        // P3-2 核心机制闭环：破韧瘫痪延后行动值 25%（拉长出招间隔与虚弱打桩窗口）
+        if (ActionValueSystem.Instance != null)
+        {
+            ActionValueSystem.Instance.DelayAction(this, 0.25f);
+        }
+
         if (stateMachine != null && vulnerableState != null)
         {
             stateMachine.ChangeState(vulnerableState);
@@ -146,6 +212,12 @@ public class EnemyController : MonoBehaviour, IDamageable
     {
         if (isDead) return;
         isDead = true;
+
+        // 死亡后立即移出行动序列，避免死后空转
+        if (ActionValueSystem.Instance != null)
+        {
+            ActionValueSystem.Instance.UnregisterEntity(this);
+        }
 
         if (EnvironmentalResonance.Instance != null && stats != null)
         {

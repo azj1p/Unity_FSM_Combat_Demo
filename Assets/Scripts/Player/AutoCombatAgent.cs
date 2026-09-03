@@ -2,7 +2,7 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 
 /// <summary>
-/// 自动战斗代理：已加入按键防抖冷却与多实例防冲突
+/// 自动战斗代理：已接入 FSM 攻击流转、0.3s 索敌目标缓存与重力垂直速度保护
 /// </summary>
 public class AutoCombatAgent : MonoBehaviour
 {
@@ -13,8 +13,24 @@ public class AutoCombatAgent : MonoBehaviour
     [SerializeField] private float attackRange = 2.0f;
     [SerializeField] private float attackCooldown = 0.8f;
 
+    [Header("AI 避险与机动配置 (消除魔法数字)")]
+    [SerializeField] private float evadeBufferDistance = 1.5f; // 满层 AOE 避险缓冲距离
+    [SerializeField] private float evadeMoveDistance = 5.0f;   // 逃跑目标位移距离
+    [SerializeField] private float toggleCooldown = 0.25f;     // Z 键防抖冷却时间
+
+    [Header("AI 索敌与 GC 优化配置")]
+    [SerializeField] private float retargetInterval = 0.3f;    // 目标重选间隔 (避免每帧全量遍历分配 GC)
+    [SerializeField] private float distanceWeight = 0.9f;      // 距离权重
+    [SerializeField] private float toughnessWeight = 0.4f;     // 临界状态韧性权重
+    [SerializeField] private float healthWeight = 0.3f;        // 临界状态血量权重
+
+    [Header("调试日志")]
+    [SerializeField] private bool showDebugLog = false;        // 关闭高频攻击日志，降低控制台噪音
+
     private float attackTimer;
+    private float retargetTimer = 0f;       // 索敌缓存刷新计时器
     private float toggleCooldownTimer = 0f; // 按键防抖计时器
+    private EnemyController cachedTarget;   // 目标缓存引用
     private PlayerController player;
     private Rigidbody rb;
     private bool isEvadingAOE = false;
@@ -33,7 +49,7 @@ public class AutoCombatAgent : MonoBehaviour
             toggleCooldownTimer -= Time.unscaledDeltaTime;
         }
 
-        // 2. 按键检测 (加入 0.25 秒防抖，杜绝连击误触)
+        // 2. 按键检测 (加入防抖冷却，杜绝连击误触)
         if (toggleCooldownTimer <= 0f)
         {
             bool zPressed = false;
@@ -48,7 +64,7 @@ public class AutoCombatAgent : MonoBehaviour
 
             if (zPressed)
             {
-                toggleCooldownTimer = 0.25f; // 锁定 0.25 秒防抖
+                toggleCooldownTimer = toggleCooldown;
                 isAutoEnabled = !isAutoEnabled;
                 StopMove();
 
@@ -74,11 +90,23 @@ public class AutoCombatAgent : MonoBehaviour
         }
 
         attackTimer -= Time.deltaTime;
+        retargetTimer -= Time.deltaTime;
+
         ExecuteAutoDecisionTree();
     }
 
     private void ExecuteAutoDecisionTree()
     {
+        // 若当前处于攻击动作硬直中，暂停移动指令，遵循 FSM 攻击窗口
+        if (player != null && player.stateMachine != null && player.attackState != null)
+        {
+            if (player.stateMachine.CurrentState == player.attackState)
+            {
+                StopMove();
+                return;
+            }
+        }
+
         var resonance = EnvironmentalResonance.Instance;
         int stacks = resonance != null ? resonance.resonanceStacks : 0;
         bool isWarning = resonance != null && resonance.isWarningAOE;
@@ -88,7 +116,7 @@ public class AutoCombatAgent : MonoBehaviour
         {
             Vector3 center = resonance.transform.position;
             float distToCenter = Vector3.Distance(transform.position, center);
-            float safeRadius = resonance.aoeRadius + 1.5f;
+            float safeRadius = resonance.aoeRadius + evadeBufferDistance;
 
             if (distToCenter < safeRadius)
             {
@@ -105,7 +133,7 @@ public class AutoCombatAgent : MonoBehaviour
                 escapeDir.y = 0;
                 if (escapeDir.sqrMagnitude < 0.001f) escapeDir = Vector3.forward;
 
-                MoveTowards(transform.position + escapeDir.normalized * 5f);
+                MoveTowards(transform.position + escapeDir.normalized * evadeMoveDistance);
                 return;
             }
         }
@@ -114,8 +142,14 @@ public class AutoCombatAgent : MonoBehaviour
             isEvadingAOE = false;
         }
 
-        // 决策分支 2：选择攻击目标
-        EnemyController target = SelectBestTarget(stacks >= 2);
+        // 决策分支 2：选择攻击目标 (带 0.3s 缓存，避免每帧执行 FindObjectsByType 导致 GC 分配)
+        if (cachedTarget == null || cachedTarget.isDead || retargetTimer <= 0f)
+        {
+            cachedTarget = SelectBestTarget(stacks >= 2);
+            retargetTimer = retargetInterval;
+        }
+
+        EnemyController target = cachedTarget;
         if (target == null)
         {
             StopMove();
@@ -159,11 +193,11 @@ public class AutoCombatAgent : MonoBehaviour
             if (enemy == null || enemy.isDead) continue;
 
             float dist = Vector3.Distance(transform.position, enemy.transform.position);
-            float score = dist;
+            float score = dist * distanceWeight;
 
             if (prioritizeBreakOrKill && enemy.stats != null)
             {
-                score = enemy.stats.currentToughness * 0.4f + enemy.stats.currentHealth * 0.3f + dist;
+                score += enemy.stats.currentToughness * toughnessWeight + enemy.stats.currentHealth * healthWeight;
             }
 
             if (score < minScore)
@@ -187,26 +221,43 @@ public class AutoCombatAgent : MonoBehaviour
         transform.position += dir * speed * Time.deltaTime;
         transform.forward = dir;
 
+        // 关键修复：仅消除水平速度惯性，保留 Y 轴物理垂直速度，允许重力正常拉回地面
         if (rb != null && !rb.isKinematic)
         {
-            rb.linearVelocity = Vector3.zero;
+            rb.linearVelocity = new Vector3(0f, rb.linearVelocity.y, 0f);
         }
     }
 
     private void StopMove()
     {
+        // 关键修复：停止移动时同样保留 Y 轴垂直速度，避免空中刹车导致悬浮停滞
         if (rb != null && !rb.isKinematic)
         {
-            rb.linearVelocity = Vector3.zero;
+            rb.linearVelocity = new Vector3(0f, rb.linearVelocity.y, 0f);
         }
     }
 
     private void AttackTarget(EnemyController target)
     {
-        float damage = player != null ? player.attackDamage : 10.0f;
-        float toughnessDamage = player != null ? player.toughnessDamage : 35.0f;
+        // 优先驱动 PlayerController 状态机进入 PlayerAttackState，确保动作窗口与手动输入单点收敛
+        if (player != null && player.stateMachine != null && player.attackState != null)
+        {
+            if (player.stateMachine.CurrentState != player.attackState)
+            {
+                player.stateMachine.ChangeState(player.attackState);
+            }
+        }
+        else
+        {
+            // 兜底直接结算判定
+            float damage = player != null ? player.attackDamage : 10.0f;
+            float toughnessDamage = player != null ? player.toughnessDamage : 35.0f;
+            target.TakeDamage(damage, toughnessDamage);
+        }
 
-        target.TakeDamage(damage, toughnessDamage);
-        Debug.Log($"【AI 攻击】对 [{target.gameObject.name}] 造成 {damage} 点伤害与 {toughnessDamage} 点削韧！");
+        if (showDebugLog)
+        {
+            Debug.Log($"【AI 攻击】驱动攻击状态，锁定目标: [{target.gameObject.name}]");
+        }
     }
 }
